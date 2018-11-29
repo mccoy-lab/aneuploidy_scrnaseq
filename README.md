@@ -19,7 +19,7 @@ Data used in Griffiths et al., 2017 were obtained using their shell script: sh g
 
 ## scploid R Package
 
-The package was installed from R using the devtools package and the following commands (as noted on https://github.com/starostikm/Aneuploidy2017/blob/master/README.md):
+The package was installed from R using the devtools package and the following commands:
 
 library(devtools)
 devtools::install_github("MarioniLab/Aneuploidy2017", subdir = "package")
