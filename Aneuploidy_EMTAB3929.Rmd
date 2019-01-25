@@ -331,7 +331,7 @@ ggsave(paste0(output_folder, "human_EMTAB3929_scRNAseq_AneuploidyType_histogram.
 ```
 
 
-```{prop_aneu_emb}
+```{r prop_aneu_emb}
 # Calculate the proportion of aneuploid cells per embryo across developmental stages and cell lineages
 aneu_data <- compiled_aneuploidy_results %>%
   group_by(cell) %>%
