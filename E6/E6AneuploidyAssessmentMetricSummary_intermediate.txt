@@ -1,0 +1,4 @@
+result
+residuals	Good quality
+ngenes	Poor quality
+zeros	Good quality
