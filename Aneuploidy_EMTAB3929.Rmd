@@ -18,84 +18,138 @@ library(MultiAssayExperiment)
 library(dplyr)
 library(tidyr)
 library(scater)
+library(Rtsne)
+library(readxl)
+library(umap)
+library(gridExtra)
+library(gplots)
+library(lme4)
 
 stringsAsFactors = FALSE 
 
-# Source functions from Griffiths' et al., 2017
-folder_location <- paste0("/Users/cmdb/Desktop/JHU/Rotation02_RajivMccoy/aneuploidy_project/griffiths_data/")
+# Source functions from Griffiths' et al., 2017 and load data from mouse 8-cell stage G&T-seq and human Trisomy 21 G&T-seq
+folder_location <- paste0("/Users/cmdb/Desktop/JHU/2018_Fall/Rotation02_RajivMccoy/aneuploidy_project/griffiths_data/")
 source(paste0(folder_location, "aneu_functions.R"))
+
+load(file = paste0(folder_location, "proc_data/emb8_data.RData"))
+load(file = paste0(folder_location, "proc_data/tris_data.RData"))
 
 # Note that the edgeR package masks the scploid getCounts object. Resolve.
 getCounts <- scploid::getCounts
 
 # Designate output
-output_folder <- "/Users/cmdb/Desktop/JHU/Rotation02_RajivMccoy/aneuploidy_project/analysis/"
+output_folder <- "/Users/cmdb/Desktop/JHU/2018_Fall/Rotation02_RajivMcCoy/aneuploidy_project/analysis/human_EMTAB3929"
 
 # Modify global options for compiling PDF
 knitr::opts_chunk$set(tidy.opts = list(width.cutoff = 60), tidy = TRUE)
 
 # Load EMTAB3929 data, originally downloaded from http://imlspenticton.uzh.ch:3838/conquer (MultiAssay Experiment).
-emtab3929_meta <- readRDS("/Users/cmdb/Desktop/JHU/Rotation02_RajivMccoy/aneuploidy_project/emtab3929_data/EMTAB3929.rds")
+emtab3929_meta <- readRDS("/Users/cmdb/Desktop/JHU/2018_Fall/Rotation02_RajivMcCoy/aneuploidy_project/emtab3929_data/EMTAB3929.rds")
 ```
 ## **1. Human Embryo EMTAB3929 scRNA-seq analysis**  
+Data are available to download at http://imlspenticton.uzh.ch:3838/conquer/.  
+
+## *Data Preparation for PCA/t-SNE Plots*
+To keep all analyses consistent, modify the original dataset as follows:  
+(1) Remove version numbers from emtab3929 Ensembl IDs  
+(2) Include GRCh38.p5 reference gene annotation  
+(3) Keep only autosomal genes  
+(4) Include cell lineage information from Stirparo et al. 2018  
+(5) Convert to log~2~(CPM + 1)   
+
+
+```{r emtab3939_DataPrep}
+# (1) Remove version numbers
+counts <- emtab3929_meta@ExperimentList@listData$gene@assays$data$count
+rownames(counts) <- sapply(strsplit(rownames(counts), "\\."), `[`, 1)
+dim(counts) # 65218  1529
+
+# (2, 3) Reference genome GRCh38.84 (which is GRCh38.p5 Ensembl 84:Mar 2016) and autosomal genes only
+human_ensembl <- useMart(biomart = "ENSEMBL_MART_ENSEMBL", host = "mar2016.archive.ensembl.org", path = "/biomart/martservice", dataset = "hsapiens_gene_ensembl")
+
+gene_table <- getBM(
+  attributes = c("ensembl_gene_id", "external_gene_name", "chromosome_name", "gene_biotype"),
+  mart = human_ensembl,
+  values = as.character(rownames(counts)),
+  filters = "ensembl_gene_id"
+)
+
+gene_table <- gene_table[gene_table$chromosome_name %in% 1:22, ] # 56400 genes
+
+# (4) Cell lineage information
+cell_lineage_data <- read_xlsx("stirparo2018_tableS4.xlsx", sheet = 1)
+cell_lineage_data <- cell_lineage_data[cell_lineage_data$Study == "Petropoulos et al., 2016 (ERP012552)", ] # 1,481 samples
+cell_lineage_data$Cell <- gsub("_", ".", cell_lineage_data$Cell)
+cell_lineage_data$EStage <- sapply(strsplit(cell_lineage_data$Embryo, "_"), "[", 1)
+
+emtab3929_meta@metadata$salmon_summary$Stage <- sapply(strsplit(emtab3929_meta@metadata$salmon_summary$sample, "\\."), `[`, 1)
+
+# (5) Modify gene expression matrix to contain only information in `gene_table` and samples with cell lineage information, 
+# and then convert counts into CPM and apply gene expression filter
+emtab3929_counts <- counts[gene_table$ensembl_gene_id, ] # 56400 genes and  1463 samples
+
+emtab3929_cpm <- cpm(emtab3929_counts, normalized.lib.sizes = TRUE, log = FALSE)
+dim(emtab3929_cpm) # 56,400 genes and 1,529 samples
+emtab3929_cpm <- emtab3929_cpm[, colnames(emtab3929_cpm) %in% cell_lineage_data$Cell]
+dim(emtab3929_cpm) # 56,400 genes and 1,463 samples
+
+# Apply gene filter and generate information for PCA plots
+gene_filter <- apply(emtab3929_cpm, 1, median) > 50
+filtered_cpm <- emtab3929_cpm[gene_filter, ] 
+dim(filtered_cpm) # 2,996 genes and 1,463 samples
+```
+
 ## *1.1 Data Summary*
 ```{r emtab3929_DataSummary, fig.show = "hold", fig.align = "center", fig.cap = "Reads Mapped to Reference Genome", out.width = "60%", dev = "pdf"}
 # (1) Generate histogram of the number of reads that mapped to reference genome GRCh38.84.
-emtab3929_meta@metadata$salmon_summary$Stage <- sapply(strsplit(emtab3929_meta@metadata$salmon_summary$sample, "\\."), `[`, 1)
-
-mapping_plot01 <- ggplot(emtab3929_meta@metadata$salmon_summary, aes(x = sample, y = num_mapped, fill = Stage)) + geom_bar(stat = "identity") 
+mapping_plot01 <- ggplot(emtab3929_meta@metadata$salmon_summary[emtab3929_meta@metadata$salmon_summary$sample %in% cell_lineage_data$Cell, ], aes(x = sample, y = num_mapped, fill = Stage)) + geom_bar(stat = "identity") 
 mapping_plot02 <- mapping_plot01 + labs(title = "",
                                         x = "Samples", 
                                         y = "Mapped Reads") + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5))
 ggsave(paste0(output_folder, "human_EMTAB3929_scRNAseq_ReadsMapped.pdf"), plot = mapping_plot02, device = "pdf", width = 6, height = 4, units = "in")
-return(mapping_plot02)
+#return(mapping_plot02)
 
-# (2) Generate table with summarized read mapping information
-emtab3929_summary <- data.frame(
-  Stage = c("E3", "E4", "E5", "E6", "E7", "Total"),
-  Cells = c(81, 190, 377, 415, 466, 1529),
-  MeanReadsMapped = c(4736734, 5587680, 5905343, 4636041, 6331946, 5589466),
-  MedianReadsMapped = c(4822716, 5492478, 4282245, 3997711, 5883858, 4912405)
-)
+# (2) Generate dotplot summarizing the samples in this study
+dotplot_data <- as.data.frame(cell_lineage_data %>%
+  group_by(`Revised lineage (this study)`, EStage) %>%
+  summarise(EmbryoCount = length(unique(Embryo)),
+            CellCount = length(Cell)))
+colnames(dotplot_data)[1] <- "lineage"
+dotplot_data$lineage <- factor(dotplot_data$lineage, levels = c("undefined", "Inner cell mass", "trophectoderm", "intermediate", "epiblast", "primitive_endoderm"))
 
-kable(emtab3929_summary, 
-      caption = "Data Summary",
-      align = rep("c", 6))
+dotplot01 <- ggplot(dotplot_data, aes(x = EStage, y = lineage)) + geom_point(aes(size = EmbryoCount, color = CellCount))
+dotplot02 <- dotplot01 + labs(title = "EMTAB3929 scRNA-seq Sample Summary", x = "\nDevelopmental Stage", y = "Cell Lineage\n") +
+  scale_color_continuous(name = "Cells") + scale_size_continuous(name = "Embryos")
+ggsave(paste0(output_folder, "human_EMTAB3929_SampleSummary_dotplot.pdf"), plot = dotplot02, device = "pdf", width = 8, height = 4.5, units = "in")
 ```
 
-## *1.1 Identifying data substructure*  
+## *1.1 Identifying data substructure using PCA, t-SNE, and UMAP*  
 PCA on log~10~(counts + 1) was performed only on genes used in assessing ploidy (i.e. genes with median CPM > 50).
 ```{r emtab3929_pca, fig.show = "hold", fig.align = "center", fig.cap = "PCA on 2,363 genes", out.width = "40%", dev = "pdf"}
-# Convert counts into CPM
-emtab3929_cpm <- cpm(emtab3929_meta@ExperimentList@listData$gene@assays$data$count, normalized.lib.sizes = TRUE, log = FALSE)
-#dim(emtab3929_cpm) # 65,218 genes and 1,529 samples
-
-# Apply gene filter and generate PCA plots
-gene_filter <- apply(emtab3929_cpm, 1, median) > 50
-filtered_cpm <- emtab3929_cpm[gene_filter, ] 
-#dim(filtered_cpm) # 2,623 genes and 1,529 samples
 pca <- prcomp(t(log10(filtered_cpm + 1)))
 variance <- pca$sdev^2
 
 pca_data <- as.data.frame(pca$x[, 1:3])
-pca_data$Stage <- emtab3929_meta@metadata$salmon_summary$Stage
+pca_data$Stage <- emtab3929_meta@metadata$salmon_summary$Stage[emtab3929_meta@metadata$salmon_summary$sample %in% cell_lineage_data$Cell]
+pca_data$CellLineage <- cell_lineage_data$`Revised lineage (this study)`[cell_lineage_data$Cell %in% rownames(pca_data)]
 
 # PCA on all data
-pca_plot01 <- ggplot(pca_data, aes(x = PC1, y = PC2, col = Stage)) + geom_point()
+pca_plot01 <- ggplot(pca_data, aes(x = PC1, y = PC2, col = CellLineage, shape = Stage)) + geom_point(alpha = 0.4)
 pca_plot02 <- pca_plot01 + labs(x = paste0("PC1 ", format(variance[1] / sum(variance)*100, digits = 3), "%"), y = paste0("PC2 ", format(variance[2] / sum(variance)*100, digits = 3), "%"))
-pca_plot03 <- pca_plot02 + theme_bw() + scale_color_brewer(palette = "Set1")
+pca_plot03 <- pca_plot02 + theme_bw() + scale_color_brewer(palette = "Set1") + scale_shape_manual(values = c(15, 16, 17, 18, 3))
 ggsave(paste0(output_folder, "human_EMTAB3929_scRNAseq_PCA01.pdf"), plot = pca_plot03, device = "pdf", width = 6, height = 4, units = "in")
-return(pca_plot03)
+#return(pca_plot03)
 
-pca_plot04 <- ggplot(pca_data, aes(x = PC1, y = PC3, col = Stage)) + geom_point()
-pca_plot05 <- pca_plot04 + labs(x = paste0("PC1 ", format(variance[1] / sum(variance)*100, digits = 3), "%"), y = paste0("PC3 ", format(variance[3] / sum(variance)*100, digits = 3), "%"))
-pca_plot06 <- pca_plot05 + theme_bw() + scale_color_brewer(palette = "Set1")
-ggsave(paste0(output_folder, "human_EMTAB3929_scRNAseq_PCA02.pdf"), plot = pca_plot06, device = "pdf", width = 6, height = 4, units = "in")
-return(pca_plot06)
+pca_plot01 <- ggplot(pca_data, aes(x = PC1, y = PC3, col = CellLineage, shape = Stage)) + geom_point(alpha = 0.4)
+pca_plot02 <- pca_plot01 + labs(x = paste0("PC1 ", format(variance[1] / sum(variance)*100, digits = 3), "%"), y = paste0("PC3 ", format(variance[3] / sum(variance)*100, digits = 3), "%"))
+pca_plot03 <- pca_plot02 + theme_bw() + scale_color_brewer(palette = "Set1") + scale_shape_manual(values = c(15, 16, 17, 18, 3))
+ggsave(paste0(output_folder, "human_EMTAB3929_scRNAseq_PCA02.pdf"), plot = pca_plot03, device = "pdf", width = 6, height = 4, units = "in")
+#return(pca_plot06)
 
+# Plot PCA separately for each of the stages
 stages <- c("E3", "E4", "E5", "E6", "E7")
-start_sample <- c(1, 82, 272, 649, 1064)
-end_sample <- c(81, 271, 648, 1063, 1529)
+start_sample <- c(1, 79, 246, 606, 1011)
+end_sample <- c(78, 245, 605, 1010, 1463)
 for (i in 1:length(stages)){
   stage_pca <- t(log10(filtered_cpm + 1))
   stage_pca <- stage_pca[start_sample[i]:end_sample[i], ]
@@ -105,7 +159,7 @@ for (i in 1:length(stages)){
   
   stage_pca_data <- as.data.frame(stage_pca$x[, 1:2])
   
-  pca_plot10 <- ggplot(stage_pca_data, aes(x = PC1, y = PC2)) + geom_point(aes(fill = "steel blue"))
+  pca_plot10 <- ggplot(stage_pca_data, aes(x = PC1, y = PC2, color = CellLineage)) + geom_point()
   pca_plot11 <- pca_plot10 + labs(subtitle = paste0("Stage: ", stages[i]),
                                   x = paste0("PC1 ", format(variance[1] / sum(variance)*100, digits = 3), "%"),
                                   y = paste0("PC2 ", format(variance[2] / sum(variance)*100, digits = 3), "%"))
@@ -117,3 +171,587 @@ for (i in 1:length(stages)){
 
 After applying a gene filter of CPM > 50, PCA was performed on `r dim(filtered_cpm)[1]` genes. This identified two clusters on PC1 (`r format(variance[1]/sum(variance)*100, digits = 3)`%) that split by embryonic stage (Figure 1).
 
+```{r emtab3929_tsne}
+# https://hms-dbmi.github.io/scw/heterogeneity.html
+d <- dist(t(log10(filtered_cpm + 1)))
+set.seed(7)
+tsne_out <- Rtsne(d, is_distance = TRUE, perplexity = 200)
+
+#plot(tsne_out$Y, pch = 16, main = "tSNE")
+tsne_data <- data.frame(
+  stage = emtab3929_meta@metadata$salmon_summary$Stage[emtab3929_meta@metadata$salmon_summary$sample %in% cell_lineage_data$Cell],
+  CellLineage = cell_lineage_data$`Revised lineage (this study)`[cell_lineage_data$Cell %in% rownames(pca_data)],
+  tsne1 = tsne_out$Y[, 1],
+  tsne2 = tsne_out$Y[, 2])
+# Several intermediate plots are made for rotation talk presentation purposes to better depict results
+# (1) Plot E3; rest are invisible so that the overall plot remains the same for all plots
+tsne_plot01 <- ggplot(tsne_data, aes(x = tsne1, y = tsne2, color = stage, shape = CellLineage)) + geom_point(alpha = 0.5, aes(size = ifelse(stage == "E3", 0.5, NA)))
+tsne_plot02 <- tsne_plot01 + theme_bw() + scale_color_manual(values = c(rgb(133, 133, 169, maxColorValue = 255), rgb(82, 125, 157, maxColorValue = 255), rgb(120, 160, 90, maxColorValue = 255), rgb(219, 184, 57, maxColorValue = 255), rgb(183, 94, 81, maxColorValue = 255))) + scale_shape_manual(values = c(15, 16, 17, 18, 6, 8)) + guides(size = "none") + scale_size_continuous(range = c(1, 4))
+ggsave(paste0(output_folder, "human_EMTAB3929_scRNAseq_tSNE01.pdf"), plot = tsne_plot02, device = "pdf", width = 9.5, height = 5, units = "in")
+
+# (2) Plot E3 and E4 
+tsne_plot01 <- ggplot(tsne_data, aes(x = tsne1, y = tsne2, color = stage, shape = CellLineage)) + geom_point(alpha = 0.5, aes(size = ifelse(stage %in% c("E3", "E4"), 0.5, NA)))
+tsne_plot02 <- tsne_plot01 + theme_bw() + scale_color_manual(values = c(rgb(133, 133, 169, maxColorValue = 255), rgb(82, 125, 157, maxColorValue = 255), rgb(120, 160, 90, maxColorValue = 255), rgb(219, 184, 57, maxColorValue = 255), rgb(183, 94, 81, maxColorValue = 255))) + scale_shape_manual(values = c(15, 16, 17, 18, 6, 8)) + guides(size = "none") + scale_size_continuous(range = c(1, 4))
+ggsave(paste0(output_folder, "human_EMTAB3929_scRNAseq_tSNE02.pdf"), plot = tsne_plot02, device = "pdf", width = 9.5, height = 5, units = "in")
+
+# (3) Plot E3, E4, and E5
+tsne_plot01 <- ggplot(tsne_data, aes(x = tsne1, y = tsne2, color = stage, shape = CellLineage)) + geom_point(alpha = 0.5, aes(size = ifelse(stage %in% c("E3", "E4", "E5"), 0.5, NA)))
+tsne_plot02 <- tsne_plot01 + theme_bw() + scale_color_manual(values = c(rgb(133, 133, 169, maxColorValue = 255), rgb(82, 125, 157, maxColorValue = 255), rgb(120, 160, 90, maxColorValue = 255), rgb(219, 184, 57, maxColorValue = 255), rgb(183, 94, 81, maxColorValue = 255))) + scale_shape_manual(values = c(15, 16, 17, 18, 6, 8)) + guides(size = "none") + scale_size_continuous(range = c(1, 4))
+ggsave(paste0(output_folder, "human_EMTAB3929_scRNAseq_tSNE03.pdf"), plot = tsne_plot02, device = "pdf", width = 9.5, height = 5, units = "in")
+
+# (4) Plot E3, E4, E5, and E6
+tsne_plot01 <- ggplot(tsne_data, aes(x = tsne1, y = tsne2, color = stage, shape = CellLineage)) + geom_point(alpha = 0.5, aes(size = ifelse(stage %in% c("E3", "E4", "E5", "E6"), 0.5, NA)))
+tsne_plot02 <- tsne_plot01 + theme_bw() + scale_color_manual(values = c(rgb(133, 133, 169, maxColorValue = 255), rgb(82, 125, 157, maxColorValue = 255), rgb(120, 160, 90, maxColorValue = 255), rgb(219, 184, 57, maxColorValue = 255), rgb(183, 94, 81, maxColorValue = 255))) + scale_shape_manual(values = c(15, 16, 17, 18, 6, 8)) + guides(size = "none") + scale_size_continuous(range = c(1, 4))
+ggsave(paste0(output_folder, "human_EMTAB3929_scRNAseq_tSNE04.pdf"), plot = tsne_plot02, device = "pdf", width = 9.5, height = 5, units = "in")
+
+# (5) Plot E3, E4, E5, E6, and E7
+tsne_plot01 <- ggplot(tsne_data, aes(x = tsne1, y = tsne2, color = stage, shape = CellLineage)) + geom_point(alpha = 0.5, aes(size = ifelse(stage %in% c("E3", "E4", "E5", "E6", "E7"), 1, NA)))
+tsne_plot02 <- tsne_plot01 + theme_bw() + scale_color_manual(values = c(rgb(133, 133, 169, maxColorValue = 255), rgb(82, 125, 157, maxColorValue = 255), rgb(120, 160, 90, maxColorValue = 255), rgb(219, 184, 57, maxColorValue = 255), rgb(183, 94, 81, maxColorValue = 255))) + scale_shape_manual(values = c(15, 16, 17, 18, 6, 8)) + guides(size = "none") + scale_size_continuous(range = c(1, 4))
+ggsave(paste0(output_folder, "human_EMTAB3929_scRNAseq_tSNE05.pdf"), plot = tsne_plot02, device = "pdf", width = 9.5, height = 5, units = "in")
+```
+
+
+```{r emtab3929_AneuploidyTest}
+# Run aneuploid test for each of the stages and tissues
+stages <- c("E3", "E4", rep("E5", 3), rep("E6", 4), rep("E7", 4))
+tissues <- c("undefined", "undefined", "undefined", "Inner cell mass", "trophectoderm", rep(c("trophectoderm", "intermediate", "epiblast", "primitive_endoderm"), 2))
+
+compiled_aneuploidy_results <- data.frame()
+compiled_ploidytest <- list()
+for (i in 1:length(stages)){
+  sdata <- cell_lineage_data[cell_lineage_data$EStage == stages[i] & cell_lineage_data$`Revised lineage (this study)` == tissues[i], ]
+
+  ploidytest = makeAneu(counts = as.matrix(emtab3929_counts[, colnames(emtab3929_counts) %in% sdata$Cell]),
+                        genes = gene_table$ensembl_gene_id,
+                        chrs = gene_table$chromosome_name,
+                        cellNames = colnames(emtab3929_counts[, colnames(emtab3929_counts) %in% sdata$Cell]),
+                        cellGroups = rep(stages[i], length(colnames(as.matrix(emtab3929_counts[, colnames(emtab3929_counts) %in% sdata$Cell])))))
+  
+  ploidytest <- doAneu(ploidytest)
+  
+  # Save ploidytest for each of the comparisons to plot the mean-variance plot later on
+  compiled_ploidytest[[i]] <- ploidytest
+  
+  # Output aneuploidy test results
+  write.table(getScores(ploidytest), file = paste0(output_folder, "/", stages[i], "/", stages[i], "AneuploidyAssessment_", tissues[i], ".txt"), sep = "\t", quote = FALSE)
+  write.table(getHits(ploidytest), file =  paste0(output_folder, "/", stages[i], "/", stages[i], "CalledAneuploidChromosomes_", tissues[i], ".txt"), sep = "\t", quote = FALSE)
+  write.table(getMetrics(ploidytest), file =  paste0(output_folder, "/", stages[i], "/", stages[i], "AneuploidyAssessmentMetrics_", tissues[i], ".txt"), sep = "\t", quote = FALSE)
+  write.table(data.frame(row.names = names(assessMetrics(ploidytest)), result = assessMetrics(ploidytest)), file = paste0(output_folder, "/", stages[i], "/", stages[i], "AneuploidyAssessmentMetricSummary_", tissues[i], ".txt"), sep = "\t", quote = FALSE)
+  
+  aneuploidy_results <- as.data.frame(getScores(ploidytest))
+  aneuploidy_results$chr <- factor(aneuploidy_results$chr)
+  aneuploidy_results$lineage <- rep(tissues[i], dim(aneuploidy_results)[1])
+  aneuploidy_results$embryo <- gsub("(.*)\\..*", "\\1", aneuploidy_results$cell)
+  
+  aneuploidy_results$ploidy <- 2 # disomy
+  aneuploidy_results$ploidy[aneuploidy_results$p.adj < 0.05 & aneuploidy_results$monosomy == TRUE] <- 1 # monosomy
+  aneuploidy_results$ploidy[aneuploidy_results$p.adj < 0.05 & aneuploidy_results$monosomy == FALSE] <- 3 # trisomy
+  
+  # Compiled the aneuploidy results from all comparisons into one dataframe
+  compiled_aneuploidy_results <- rbind(compiled_aneuploidy_results, aneuploidy_results)
+
+  # Generate heatmap of aneuploidy calls
+  heatmap_matrix <- aneuploidy_results[, c(1, 2, 10)] %>%
+    spread(chr, ploidy)
+  rownames(heatmap_matrix) <- heatmap_matrix$cell
+  rownames(heatmap_matrix) <- gsub("^late.", "", rownames(heatmap_matrix))
+  rownames(heatmap_matrix) <- gsub("^early.", "", rownames(heatmap_matrix))
+  heatmap_matrix <- heatmap_matrix[, -1]
+  heatmap_matrix <- data.matrix(heatmap_matrix)
+  
+  my_colors <- c(rgb(82, 125, 157, maxColorValue = 255), "gray88", rgb(183, 94, 81, maxColorValue = 255))
+  pdf_height <- c(rep(18, 3), 5, 8)
+  pdf_width <- c(rep(8, 5))
+  
+  pdf(paste0(output_folder, "/", stages[i], "/", stages[i], "CalledAneuploidChromosomes_Heatmap_", tissues[i], ".pdf"), height = 18, width = 8)
+  heatmap.2(heatmap_matrix, 
+            
+            # dendrogram control
+            dendrogram = "none",
+            Rowv = FALSE,
+            Colv = FALSE,
+            
+            # level trace
+            trace = "none",
+            
+            # data scaling
+            scale = "none",
+            
+            # color key and density info
+            keysize = 0.5,
+            key.xlab = "",
+            key.xtickfun = function(){
+              return(list(labels = c("M", "D", "T"), at = c(0.15, 0.5, 0.85), tick = FALSE))
+            },
+            density.info = "none",
+            
+            # plot layout
+            lhei = c(0.3, 3.5),
+            lwid = c(1, 3.5),
+            
+            # colors
+            col = my_colors,
+            
+            # plot labels and set sizes
+            main = "Aneuploidy Heatmap",
+            xlab = "Chromosome",
+
+            # row/column labeling ()
+            RowSideColors = gsub("[[:alpha:]]", "", gsub("\\.", "", gsub("^E", "", gsub("(.*)\\..*", "\\1", rownames(heatmap_matrix))))),
+            srtCol = 0,
+            adjCol = c(0.5, 0.5))
+  dev.off()
+}
+```
+
+
+```{r aneuploidies}
+# Calculate what types of aneuploidies occur in each embryo (meiotic versus mitotic and simple versus complex).
+mcompiled_aneuploidy_results <- compiled_aneuploidy_results %>%
+  group_by(embryo, chr) %>%
+  summarise(AneuploidyEvents = length(ploidy[ploidy != 2]),
+            TotalCells = length(cell))
+
+mcompiled_aneuploidy_results$AneuploidyType <- ifelse(mcompiled_aneuploidy_results$AneuploidyEvents == 0, "none", 
+                                                      ifelse(mcompiled_aneuploidy_results$AneuploidyEvents == mcompiled_aneuploidy_results$TotalCells, "meiotic", 
+                                                             "mitotic"))
+histogram_data <- mcompiled_aneuploidy_results %>%
+  group_by(embryo) %>%
+  summarise(MitoticEvents = length(AneuploidyType[AneuploidyType == "mitotic"]),
+            MeioticEvents = length(AneuploidyType[AneuploidyType == "meiotic"]))
+histogram_data <- melt(histogram_data)
+histogram_data$EStage <- sapply(strsplit(histogram_data$embryo, "\\."), "[", 1)
+histogram_data$embryo <- factor(histogram_data$embryo, levels = unique(histogram_data$embryo[order(histogram_data$EStage)]))
+
+event_histogram01 <- ggplot(histogram_data, aes(x = embryo, y = value, fill = variable)) + geom_bar(stat = "identity")
+event_histogram02 <- event_histogram01 + labs(title = "",
+                                        x = "Embryos", 
+                                        y = "Frequency") + theme_bw() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5)) + scale_fill_manual(name = "", breaks = c("MitoticEvents", "MeioticEvents"), labels = c("Mitotic", "Meiotic"), values = c("azure3", "cadetblue4"))
+ggsave(paste0(output_folder, "human_EMTAB3929_scRNAseq_AneuploidyType_histogram.pdf"), plot = event_histogram02, device = "pdf", width = 12, height = 4, units = "in")
+```
+
+
+```{prop_aneu_emb}
+# Calculate the proportion of aneuploid cells per embryo across developmental stages and cell lineages
+aneu_data <- compiled_aneuploidy_results %>%
+  group_by(cell) %>%
+  summarise(embryo = unique(embryo),
+            ploidy = ifelse(is.element(1, ploidy) | is.element(3, ploidy), "aneuploid", "euploid"),
+            lineage = unique(lineage),
+            stage = unique(EStage))
+prop_aneu_data <- aneu_data %>%
+  group_by(embryo) %>%
+  summarise(prop_aneu = ifelse(length(ploidy) > 1, round(length(ploidy[ploidy == "aneuploid"]) / length(ploidy) * 100, digits = 3), 111),
+            stage = unique(stage))
+
+prop_aneu_data$NumEStage <- ifelse(prop_aneu_data$stage == "E3", 1, 
+                                                ifelse(prop_aneu_data$stage == "E4", 2,
+                                                       ifelse(prop_aneu_data$stage == "E5", 3,
+                                                              ifelse(prop_aneu_data$stage == "E6", 4, 5))))
+#fit <- lm(prop_aneu ~ NumEStage, data = prop_aneu_data[prop_aneu_data$prop_aneu != 1.111, ])
+
+prop_aneu_plot01 <- ggplot(prop_aneu_data[prop_aneu_data$prop_aneu != 111, ], aes(x = NumEStage, y = prop_aneu, color = stage)) + geom_point(size = 2) 
+# prop_aneu_plot02 <- prop_aneu_plot01 + stat_smooth(method = "lm", col = "steelblue") + labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+#                      "Intercept =",signif(fit$coef[[1]],5 ),
+#                      " Slope =",signif(fit$coef[[2]], 5),
+#                      " P =",signif(summary(fit)$coef[2,4], 5)))
+prop_aneu_plot02 <- prop_aneu_plot01 + scale_color_manual(values = c(rgb(133, 133, 169, maxColorValue = 255), rgb(82, 125, 157, maxColorValue = 255), rgb(120, 160, 90, maxColorValue = 255), rgb(219, 184, 57, maxColorValue = 255), rgb(183, 94, 81, maxColorValue = 255))) + scale_shape_manual(values = c(15, 16, 17, 18, 6, 8)) + labs(title = "",
+                                        x = "Developmental stage", 
+                                        y = "Aneuploid cells per embryo (%)") + theme_bw()
+ggsave(paste0(output_folder, "human_EMTAB3929_scRNAseq_AneuploidCellsPerEmbryo_ScatterPlot.pdf"), plot = prop_aneu_plot02, device = "pdf", width = 6, height = 4, units = "in")
+```
+
+
+```{r prop_emb_aneu}
+# Calculate the proportin of embryos with aneuploid cells across developmental stages
+prop_embryo_data <- aneu_data %>%
+  group_by(embryo) %>%
+  summarise(prop_aneu = length(ploidy[ploidy == "aneuploid"]) / length(ploidy) * 100,
+            stage = unique(stage))
+prop_embryo_data <- prop_embryo_data %>%
+  group_by(stage) %>%
+  summarise(emb_aneu = length(prop_aneu[prop_aneu > 0]) / length(prop_aneu) *100)
+
+prop_embryo_plot01 <- ggplot(prop_embryo_data, aes(x = stage, y = emb_aneu, color = stage)) + geom_point(size = 5)
+prop_embryo_plot02 <- prop_embryo_plot01 + scale_y_continuous(limits = c(0, 100)) + scale_color_manual(values = c(rgb(133, 133, 169, maxColorValue = 255), rgb(82, 125, 157, maxColorValue = 255), rgb(120, 160, 90, maxColorValue = 255), rgb(219, 184, 57, maxColorValue = 255), rgb(183, 94, 81, maxColorValue = 255))) + scale_shape_manual(values = c(15, 16, 17, 18, 6, 8)) + labs(title = "",
+                                        x = "Developmental stage", 
+                                        y = "Embryos with aneuploid cells (%)") + theme_bw()
+ggsave(paste0(output_folder, "human_EMTAB3929_scRNAseq_EmbryosWithAneuploidCells_ScatterPlot.pdf"), plot = prop_embryo_plot02, device = "pdf", width = 6, height = 4, units = "in")
+```
+
+```{r clustered_heatmaps}
+# Generate clustered heatmaps for each embryo. Specifically, depict heatmap of aneuploidy results for each embryo, clustered by cells across all chromosomes. Chromosomes are thought to be independent, so do not cluster by chromosomes, just by cells. 
+embryos <- unique(compiled_aneuploidy_results$embryo)
+
+for (i in 1:length(embryos)){
+  sdata <- compiled_aneuploidy_results[compiled_aneuploidy_results$embryo == embryos[i], ]
+  
+  heatmap_matrix <- sdata[, c(1, 2, 10)] %>%
+    spread(chr, ploidy)
+  rownames(heatmap_matrix) <- heatmap_matrix$cell
+  heatmap_matrix <- heatmap_matrix[, -1]
+  heatmap_matrix <- data.matrix(heatmap_matrix)
+
+  embryo_folder <- sapply(strsplit(embryos, "\\."), "[", 1)
+  
+  # can only generate heatmaps if there is more than 1 result
+  if (dim(heatmap_matrix)[1] >= 2){
+     # Colors if monosomy, disomy, and trisomy present
+    if(length(unique(c(heatmap_matrix))) == 3){
+      my_colors <- c(rgb(82, 125, 157, maxColorValue = 255), rgb(224, 224, 224, maxColorValue = 255), rgb(183, 94, 81, maxColorValue = 255))
+      key_label <- c("M", "D", "T")
+      at_label <- c(0.15, 0.5, 0.85)
+    }
+    # Colors if only two of the three ploidies are present
+    if (length(unique(c(heatmap_matrix))) == 2){
+      # monosomy and disomy present
+      if (is.element(1, unique(c(heatmap_matrix))) & is.element(2, unique(c(heatmap_matrix)))) {
+        my_colors <- c(rgb(82, 125, 157, maxColorValue = 255), rgb(224, 224, 224, maxColorValue = 255))
+        key_label <- c("M", "D")
+        at_label <- c(0.25, 0.75)
+      }
+      # monosomy and trisomy present
+      else if (is.element(1, unique(c(heatmap_matrix))) & is.element(3, unique(c(heatmap_matrix)))){
+        my_colors <- c(rgb(82, 125, 157, maxColorValue = 255), rgb(183, 94, 81, maxColorValue = 255))
+        key_label <- c("M", "T")
+        at_label <- c(0.25, 0.75)
+      }
+      # disomy and trisomy present
+      else if (is.element(2, unique(c(heatmap_matrix))) & is.element(3, unique(c(heatmap_matrix)))){
+        my_colors <- c(rgb(224, 224, 224, maxColorValue = 255), rgb(183, 94, 81, maxColorValue = 255))
+        key_label <- c("D", "T")
+        at_label <- c(0.25, 0.75)
+      }
+    }
+    # Colors only if one of the two ploidies are present
+    if(length(unique(c(heatmap_matrix))) == 1){
+      # only monosomy present
+      if (is.element(1, unique(c(heatmap_matrix)))) {
+        my_colors <- rep(rgb(82, 125, 157, maxColorValue = 255), 2)
+        key_label <- "M"
+        at_label <- 0.50
+      }
+      # only disomy present
+      else if (is.element(2, unique(c(heatmap_matrix)))) {
+        my_colors <- rep(rgb(224, 224, 224, maxColorValue = 255), 2)
+        key_label <- "D"
+        at_label <- 0.50
+      }
+      # only trisomy present
+      else if (is.element(3, unique(c(heatmap_matrix)))) {
+        my_colors <- rep(rgb(183, 94, 81, maxColorValue = 255), 2)
+        key_label <- "T"
+        at_label <- 0.50
+      }
+    }
+
+    distance.row <- dist(heatmap_matrix, method = "euclidean") # same parameters as honeyBADGER
+    cluster.row <- hclust(distance.row, method = "ward.D") # same parameters as honeyBADGER
+    
+    sample_order <- rev(cluster.row$labels[cluster.row$order])
+    cell_lineage <- cell_lineage_data[, c(3, 9)][match(sample_order, cell_lineage_data$Cell), ]
+    cell_lineage$colors <- ifelse(cell_lineage$`Revised lineage (this study)` == "undetermined", "#B3E2CD", 
+                                  ifelse(cell_lineage$`Revised lineage (this study)` == "Inner cell mass", "#FDCDAC",
+                                         ifelse(cell_lineage$`Revised lineage (this study)` == "trophectoderm", "#CBD5E8",
+                                                ifelse(cell_lineage$`Revised lineage (this study)` == "intermediate", "#F4CAE4",
+                                                       ifelse(cell_lineage$`Revised lineage (this study)` == "epiblast", "#E6F5C9", "#FFF2AE")))))
+    
+    pdf(paste0(output_folder, "/", embryo_folder[i], "/CalledAneuploidChromosomes_ClusteredHeatmap_", embryos[i], ".pdf"), height = 10, width = 10)
+    heatmap.2(heatmap_matrix, 
+              
+              # dendrogram control
+              dendrogram = "row",
+              Rowv = as.dendrogram(cluster.row),
+              Colv = FALSE,
+              
+              # level trace
+              trace = "none",
+              
+              # data scaling
+              scale = "none",
+              
+              # color key and density info
+              keysize = 0.1,
+              key.xlab = "",
+              key.xtickfun = function(){
+                return(list(labels = key_label, at = at_label, tick = FALSE))
+              },
+              density.info = "none",
+              
+              # plot layout
+              lhei = c(0.5, 1),
+              lwid = c(0.6, 1),
+              
+              # colors
+              col = my_colors,
+              
+              # plot labels and set sizes
+              xlab = "Chromosome",
+              margins = c(8, 12),
+              
+              # row/column labeling ()
+              RowSideColors = cell_lineage$colors,
+              srtCol = 0,
+              adjCol = c(0.5, 0.5))
+    legend("topright", legend = unique(cell_lineage$`Revised lineage (this study)`), col = unique(cell_lineage$colors), lty = 1, lwd = 0.5, cex = 0.7)
+    dev.off()
+  }
+}
+```
+
+
+```{r questions}
+# (1) Does the aneuploidy rate change (i.e. decline) with developmental stage? How to interpret results: values need to be negative for association with aneuploidy to hold true
+compiled_aneuploidy_results$EStage <- sapply(strsplit(as.character(compiled_aneuploidy_results$cell), "\\."), "[", 1)
+compiled_aneuploidy_results$NumEStage <- ifelse(compiled_aneuploidy_results$EStage == "E3", 1, 
+                                                ifelse(compiled_aneuploidy_results$EStage == "E4", 2,
+                                                       ifelse(compiled_aneuploidy_results$EStage == "E5", 3,
+                                                              ifelse(compiled_aneuploidy_results$EStage == "E6", 4, 5))))
+compiled_aneuploidy_results$ploidy <- as.factor(compiled_aneuploidy_results$ploidy)
+compiled_aneuploidy_results$is_TE <- ifelse(compiled_aneuploidy_results$lineage == "trophectoderm", "TRUE", "FALSE")
+compiled_aneuploidy_results$is_euploid <- ifelse(compiled_aneuploidy_results$ploidy == 2, 1, 0)
+
+# NumEStage is numeric and chr is factor
+m1 <- glmer(formula = is_euploid ~ 1 + is_TE + NumEStage + factor(chr) + (1 | embryo), family = binomial, data = compiled_aneuploidy_results, control = glmerControl(calc.derivs = FALSE))
+
+confint(m1, method = "Wald") # method "Wald" makes this run faster...do exp(2.5 number) and exp(97.5 number) to get the odds ratio
+
+m1_coef <- data.table(term = rownames(summary(m1)[["coefficients"]]), summary(m1)[["coefficients"]])
+m1_coef[!(grepl("factor", term))]
+
+write.table(compiled_aneuploidy_results, file = "~/Desktop/compiled_aneuploidy_results.txt", col.names = T, row.names = F, quote = F, sep = ",")
+
+# (2) Do certain chromosomes harbor more aneuploidies than others?
+chromosome_data <- compiled_aneuploidy_results %>%
+  group_by(chr) %>%
+  summarise(
+            trisomy = sum(ploidy == 3) / length(ploidy),
+            monosomy = sum(ploidy == 1) / length(ploidy))
+chromosome_data <- melt(chromosome_data)
+chromosome_plot01 <- ggplot(chromosome_data, aes(x = chr, y = value, fill = variable)) + geom_col()
+chromosome_plot02 <- chromosome_plot01 + scale_fill_manual(values = c(rgb(183, 94, 81, maxColorValue = 255), rgb(82, 125, 157, maxColorValue = 255))) + theme_bw()
+chromosome_plot03 <- chromosome_plot02 + labs(title = "Proportion of Aneuploidy across Chromosomes", x = "Chromosome", y = "Proportion") + theme(legend.title = element_blank())
+ggsave(paste0(output_folder, "AneuploidyChromosomes.pdf"), plot = chromosome_plot03, height = 5, width = 10.5)
+
+# (3) Within each embryo, what is the proportion of aneuploidy across developmental stages and chromosomes?
+summarized <- compiled_aneuploid_data %>%
+  group_by(embryoID, EStage) %>%
+  summarise(disomy = sum(ploidy == "disomy") / length(ploidy),
+            trisomy = sum(ploidy == "trisomy") / length(ploidy),
+            monosomy = sum(ploidy == "monosomy") / length(ploidy))
+proportion_data <- melt(summarized)
+proportion_data$embryoID <- gsub("^late\\.", "", proportion_data$embryoID)
+proportion_data$embryoID <- gsub("^early\\.", "", proportion_data$embryoID)
+
+propaneu_plot01 <- ggplot(proportion_data, aes(x = EStage, y = value, fill = variable)) + geom_col() + facet_wrap(aes(cols = embryoID), ncol = 4)
+propaneu_plot02 <- propaneu_plot01 + scale_fill_manual(values = c("gray88", "red3", "royalblue3")) + theme_bw()
+propaneu_plot03 <- propaneu_plot02 + labs(title = "Proportion of Aneuploidy within Embryos", x = "Developmental Stage", y = "Proportin") + theme(legend.title = element_blank())
+ggsave(paste0(output_folder, "AneuploidyProportion.pdf"), plot = propaneu_plot03, height = 10, width = 8)
+```
+
+
+```{r gene_expression_variance}
+# Use the methods by Griffiths et al. to assess the gene expression variance between the two control data sets (i.e. mouse 8-cell G&T-seq data and human Trisomy 21 G&T-seq data) and this human embryo data set.
+
+test_median <- 50
+sample_size <- 1000
+set.seed(007)
+
+# (1) Compiled data for human Trisomy 21 G&T-seq data
+t21_trisomy <- getCPM(splitCellsByGroup(t21)[["T21"]])
+t21_norm <- getCPM(splitCellsByGroup(t21)[["Diploid"]])
+
+t21_trisomy_HEXP <- t21_trisomy[apply(t21_trisomy, 1, median) > test_median, ]
+t21_norm_HEXP <- t21_norm[apply(t21_norm, 1, median) > test_median, ]
+
+t21_trisomy_mean <- apply(t21_trisomy_HEXP, 1, mean)
+t21_trisomy_sd <- apply(t21_trisomy_HEXP, 1, sd)
+t21_norm_mean <- apply(t21_norm_HEXP, 1, mean)
+t21_norm_sd <- apply(t21_norm_HEXP, 1, sd)
+
+t21_trisomy_lm <- lm(log10(t21_trisomy_sd) ~ log10(t21_trisomy_mean))
+t21_norm_lm <- lm(log10(t21_norm_sd) ~ log10(t21_norm_mean))
+
+t21_trisomy_sample <- sample(length(t21_trisomy_mean), sample_size)
+t21_norm_sample <- sample(length(t21_norm_mean), sample_size)
+
+# (2) Compile data for mouse embryo G&T-seq data
+emb8_reversine <- getCPM(splitCellsByGroup(emb8)[["Reversine"]])
+emb8_control <- getCPM(splitCellsByGroup(emb8)[["Control"]])
+
+emb8_reversine <- emb8_reversine[rowMedians(emb8_reversine) > test_median, ]
+emb8_control <- emb8_control[rowMedians(emb8_control) > test_median,]
+
+emb8_reversine_mean <- rowMeans(emb8_reversine)
+emb8_reversine_sd <- apply(emb8_reversine, 1, sd)
+emb8_control_mean <- rowMeans(emb8_control)
+emb8_control_sd <- apply(emb8_control, 1, sd)
+
+emb8_reversine_lm <- lm(log10(emb8_reversine_sd) ~ log10(emb8_reversine_mean))
+emb8_control_lm <- lm(log10(emb8_control_sd) ~ log10(emb8_control_mean))
+
+emb8_reversine_sample <- sample(length(emb8_reversine_mean), sample_size)
+emb8_control_sample <- sample(length(emb8_control_mean), sample_size)
+
+# (3) Compile data for human EMTAB3929 scRNA-seq data
+aneuploidy_tests <- list()
+aneuploidy_tests_mean <- list()
+aneuploidy_tests_sd <- list()
+aneuploidy_tests_lm <- list()
+aneuploidy_tests_sample <- list()
+
+for (k in 1:length(compiled_ploidytest)){
+  aneuploidy_tests[[k]] <- compiled_ploidytest[[k]]@cpm
+  aneuploidy_tests[[k]] <- aneuploidy_tests[[k]][apply(aneuploidy_tests[[k]], 1, median) > test_median, ]
+
+  aneuploidy_tests_mean[[k]] <- rowMeans(aneuploidy_tests[[k]])
+  aneuploidy_tests_sd[[k]] <- apply(aneuploidy_tests[[k]], 1, sd)
+  
+  aneuploidy_tests_lm[[k]] <- lm(log10(aneuploidy_tests_sd[[k]]) ~ log10(aneuploidy_tests_mean[[k]]))
+  
+  aneuploidy_tests_sample[[k]] <- sample(length(aneuploidy_tests_mean[[k]]), sample_size)
+}
+
+data_compiled <- data.frame(
+  mean = c(t21_trisomy_mean[t21_trisomy_sample], t21_norm_mean[t21_norm_sample], 
+           emb8_reversine_mean[emb8_reversine_sample], emb8_control_mean[emb8_control_sample], 
+           aneuploidy_tests_mean[[1]][aneuploidy_tests_sample[[1]]],
+           aneuploidy_tests_mean[[2]][aneuploidy_tests_sample[[2]]],
+           aneuploidy_tests_mean[[3]][aneuploidy_tests_sample[[3]]],
+           aneuploidy_tests_mean[[4]][aneuploidy_tests_sample[[4]]],
+           aneuploidy_tests_mean[[5]][aneuploidy_tests_sample[[5]]],
+           aneuploidy_tests_mean[[6]][aneuploidy_tests_sample[[6]]],
+           aneuploidy_tests_mean[[7]][aneuploidy_tests_sample[[7]]],
+           aneuploidy_tests_mean[[8]][aneuploidy_tests_sample[[8]]],
+           aneuploidy_tests_mean[[9]][aneuploidy_tests_sample[[9]]],
+           aneuploidy_tests_mean[[10]][aneuploidy_tests_sample[[10]]],
+           aneuploidy_tests_mean[[11]][aneuploidy_tests_sample[[11]]],
+           aneuploidy_tests_mean[[12]][aneuploidy_tests_sample[[12]]],
+           aneuploidy_tests_mean[[13]][aneuploidy_tests_sample[[13]]]),
+  
+  sd = c(t21_trisomy_sd[t21_trisomy_sample], t21_norm_sd[t21_norm_sample], 
+         emb8_reversine_sd[emb8_reversine_sample], emb8_control_sd[emb8_control_sample], 
+         aneuploidy_tests_sd[[1]][aneuploidy_tests_sample[[1]]],
+         aneuploidy_tests_sd[[2]][aneuploidy_tests_sample[[2]]],
+         aneuploidy_tests_sd[[3]][aneuploidy_tests_sample[[3]]],
+         aneuploidy_tests_sd[[4]][aneuploidy_tests_sample[[4]]],
+         aneuploidy_tests_sd[[5]][aneuploidy_tests_sample[[5]]],
+         aneuploidy_tests_sd[[6]][aneuploidy_tests_sample[[6]]],
+         aneuploidy_tests_sd[[7]][aneuploidy_tests_sample[[7]]],
+         aneuploidy_tests_sd[[8]][aneuploidy_tests_sample[[8]]],
+         aneuploidy_tests_sd[[9]][aneuploidy_tests_sample[[9]]],
+         aneuploidy_tests_sd[[10]][aneuploidy_tests_sample[[10]]],
+         aneuploidy_tests_sd[[11]][aneuploidy_tests_sample[[11]]],
+         aneuploidy_tests_sd[[12]][aneuploidy_tests_sample[[12]]],
+         aneuploidy_tests_sd[[13]][aneuploidy_tests_sample[[13]]]),
+  
+  data = c(rep("Control_T21+", sample_size), rep("Control_T21-", sample_size), 
+           rep("Control_MouseEmbryos+", sample_size), rep("Control_MouseEmbryos-", sample_size), 
+           rep("E3", sample_size), 
+           rep("E4", sample_size), 
+           rep("E5", sample_size*3),
+           rep("E6", sample_size*4), 
+           rep("E7", sample_size*4))
+)
+data_compiled <- data_compiled[sample(nrow(data_compiled), nrow(data_compiled), replace = FALSE), ]
+
+mdata_compiled <- t(sapply(list(t21_trisomy_lm, t21_norm_lm, 
+                                emb8_reversine_lm, emb8_control_lm, 
+                                aneuploidy_tests_lm[[1]],
+                                aneuploidy_tests_lm[[2]],
+                                aneuploidy_tests_lm[[3]],
+                                aneuploidy_tests_lm[[4]],
+                                aneuploidy_tests_lm[[5]],
+                                aneuploidy_tests_lm[[6]],
+                                aneuploidy_tests_lm[[7]],
+                                aneuploidy_tests_lm[[8]],
+                                aneuploidy_tests_lm[[9]],
+                                aneuploidy_tests_lm[[10]],
+                                aneuploidy_tests_lm[[11]],
+                                aneuploidy_tests_lm[[12]],
+                                aneuploidy_tests_lm[[13]]), coef))
+rownames(mdata_compiled) <- c("Control_T21+", "Control_T21-", 
+                              "Control_MouseEmbryos+", "Control_MouseEmbryos-", 
+                              "E3", "E4", rep("E5", 3), rep("E6", 4), rep("E7", 4))
+colnames(mdata_compiled) <- c("int", "slope")
+
+variance_plot01 <- ggplot(data_compiled ,aes (x = mean, y = sd, col = factor(data))) + geom_point(size = 1, alpha = 0.5) +  
+  scale_x_log10() + scale_y_log10(breaks = c(20, 50, 10^(2:4))) +
+  theme_bw() +
+  scale_color_manual(values = c("Control_T21+" = "lightsteelblue3", "Control_T21-" = "lightsteelblue4", 
+                                "Control_MouseEmbryos+" = "darkseagreen3", "Control_MouseEmbryos-" = "darkseagreen4", 
+                                "E3" = rgb(133, 133, 169, maxColorValue = 255),
+                                "E4" = rgb(82, 125, 157, maxColorValue = 255),
+                                "E5" = rgb(120, 160, 90, maxColorValue = 255),
+                                "E6" = rgb(219, 184, 57, maxColorValue = 255),
+                                "E7" = rgb(183, 94, 81, maxColorValue = 255)), name = "") +
+  geom_abline(data = as.data.frame(mdata_compiled), aes(slope = slope, intercept = int, col = factor(rownames(mdata_compiled))), alpha = 0.8, lwd = 1.5) +
+  labs(x = expression("log"[10]*"(mean)"), y = expression("log"[10]* "(standard deviation)")) 
+
+ggsave(variance_plot01, file = paste0(output_folder, "human_EMTAB3929_scRNAseq_GeneExpressionVariance.pdf"), width = 7, height = 5)
+
+variance_plot01 <- ggplot(data_compiled[data_compiled$data %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E3"), ] ,aes (x = mean, y = sd, col = factor(data))) + geom_point(size = 1, alpha = 0.5) +  
+  scale_x_log10() + scale_y_log10(breaks = c(20, 50, 10^(2:4))) +
+  theme_bw() +
+  scale_color_manual(values = c("Control_T21+" = "lightsteelblue3", "Control_T21-" = "lightsteelblue4", 
+                                "Control_MouseEmbryos+" = "darkseagreen3", "Control_MouseEmbryos-" = "darkseagreen4", 
+                                "E3" = rgb(133, 133, 169, maxColorValue = 255)), name = "") +
+  geom_abline(data = as.data.frame(mdata_compiled[rownames(mdata_compiled) %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E3"), ]), aes(slope = slope, intercept = int, col = factor(rownames(mdata_compiled[rownames(mdata_compiled) %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E3"), ]))), alpha = 0.8, lwd = 1.5) +
+  labs(x = expression("log"[10]*"(mean)"), y = expression("log"[10]* "(standard deviation)")) 
+variance_plot02 <- variance_plot01 
+ggsave(variance_plot02, file = paste0(output_folder, "human_EMTAB3929_scRNAseq_GeneExpressionVariance_E3.pdf"), width = 10, height = 5)
+
+variance_plot01 <- ggplot(data_compiled[data_compiled$data %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-"), ] ,aes (x = mean, y = sd, col = factor(data))) + geom_point(size = 1, alpha = 0.5) +  
+  scale_x_log10() + scale_y_log10(breaks = c(20, 50, 10^(2:4))) +
+  theme_bw() +
+  scale_color_manual(values = c("Control_T21+" = "lightsteelblue3", "Control_T21-" = "lightsteelblue4", 
+                                "Control_MouseEmbryos+" = "darkseagreen3", "Control_MouseEmbryos-" = "darkseagreen4"), name = "") +
+  geom_abline(data = as.data.frame(mdata_compiled[rownames(mdata_compiled) %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-"), ]), aes(slope = slope, intercept = int, col = factor(rownames(mdata_compiled[rownames(mdata_compiled) %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-"), ]))), alpha = 0.8, lwd = 1.5) +
+  labs(x = expression("log"[10]*"(mean)"), y = expression("log"[10]* "(standard deviation)")) 
+variance_plot02 <- variance_plot01 
+ggsave(variance_plot02, file = paste0(output_folder, "human_EMTAB3929_scRNAseq_GeneExpressionVariance_CTRLS.pdf"), width = 7, height = 5)
+
+variance_plot01 <- ggplot(data_compiled[data_compiled$data %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E7"), ] ,aes (x = mean, y = sd, col = factor(data))) + geom_point(size = 1, alpha = 0.5) +  
+  scale_x_log10() + scale_y_log10(breaks = c(20, 50, 10^(2:4))) +
+  theme_bw() +
+  scale_color_manual(values = c("Control_T21+" = "lightsteelblue3", "Control_T21-" = "lightsteelblue4", 
+                                "Control_MouseEmbryos+" = "darkseagreen3", "Control_MouseEmbryos-" = "darkseagreen4", 
+                                "E7" = rgb(183, 94, 81, maxColorValue = 255)), name = "") +
+  geom_abline(data = as.data.frame(mdata_compiled[rownames(mdata_compiled) %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E7"), ]), aes(slope = slope, intercept = int, col = factor(rownames(mdata_compiled[rownames(mdata_compiled) %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E7"), ]))), alpha = 0.8, lwd = 1.5) +
+  labs(x = expression("log"[10]*"(mean)"), y = expression("log"[10]* "(standard deviation)")) 
+variance_plot02 <- variance_plot01 
+ggsave(variance_plot02, file = paste0(output_folder, "human_EMTAB3929_scRNAseq_GeneExpressionVariance_E7.pdf"), width = 10, height = 5)
+
+variance_plot01 <- ggplot(data_compiled[data_compiled$data %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E4"), ] ,aes (x = mean, y = sd, col = factor(data))) + geom_point(size = 1, alpha = 0.5) +  
+  scale_x_log10() + scale_y_log10(breaks = c(20, 50, 10^(2:4))) +
+  theme_bw() +
+  scale_color_manual(values = c("Control_T21+" = "lightsteelblue3", "Control_T21-" = "lightsteelblue4", 
+                                "Control_MouseEmbryos+" = "darkseagreen3", "Control_MouseEmbryos-" = "darkseagreen4", 
+                                "E4" = rgb(82, 125, 157, maxColorValue = 255)), name = "") +
+  geom_abline(data = as.data.frame(mdata_compiled[rownames(mdata_compiled) %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E4"), ]), aes(slope = slope, intercept = int, col = factor(rownames(mdata_compiled[rownames(mdata_compiled) %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E4"), ]))), alpha = 0.8, lwd = 1.5) +
+  labs(x = expression("log"[10]*"(mean)"), y = expression("log"[10]* "(standard deviation)")) 
+variance_plot02 <- variance_plot01 
+ggsave(variance_plot02, file = paste0(output_folder, "human_EMTAB3929_scRNAseq_GeneExpressionVariance_E4.pdf"), width = 10, height = 5)
+
+variance_plot01 <- ggplot(data_compiled[data_compiled$data %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E5"), ] ,aes (x = mean, y = sd, col = factor(data))) + geom_point(size = 1, alpha = 0.5) +  
+  scale_x_log10() + scale_y_log10(breaks = c(20, 50, 10^(2:4))) +
+  theme_bw() +
+  scale_color_manual(values = c("Control_T21+" = "lightsteelblue3", "Control_T21-" = "lightsteelblue4", 
+                                "Control_MouseEmbryos+" = "darkseagreen3", "Control_MouseEmbryos-" = "darkseagreen4", 
+                                "E5" = rgb(120, 160, 90, maxColorValue = 255)), name = "") +
+  geom_abline(data = as.data.frame(mdata_compiled[rownames(mdata_compiled) %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E5"), ]), aes(slope = slope, intercept = int, col = factor(rownames(mdata_compiled[rownames(mdata_compiled) %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E5"), ]))), alpha = 0.8, lwd = 1.5) +
+  labs(x = expression("log"[10]*"(mean)"), y = expression("log"[10]* "(standard deviation)")) 
+variance_plot02 <- variance_plot01 
+ggsave(variance_plot02, file = paste0(output_folder, "human_EMTAB3929_scRNAseq_GeneExpressionVariance_E5.pdf"), width = 10, height = 5)
+
+variance_plot01 <- ggplot(data_compiled[data_compiled$data %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E6"), ] ,aes (x = mean, y = sd, col = factor(data))) + geom_point(size = 1, alpha = 0.5) +  
+  scale_x_log10() + scale_y_log10(breaks = c(20, 50, 10^(2:4))) +
+  theme_bw() +
+  scale_color_manual(values = c("Control_T21+" = "lightsteelblue3", "Control_T21-" = "lightsteelblue4", 
+                                "Control_MouseEmbryos+" = "darkseagreen3", "Control_MouseEmbryos-" = "darkseagreen4", 
+                                "E6" = rgb(219, 184, 57, maxColorValue = 255)), name = "") +
+  geom_abline(data = as.data.frame(mdata_compiled[rownames(mdata_compiled) %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E6"), ]), aes(slope = slope, intercept = int, col = factor(rownames(mdata_compiled[rownames(mdata_compiled) %in% c("Control_T21+", "Control_T21-", "Control_MouseEmbryos+", "Control_MouseEmbryos-", "E6"), ]))), alpha = 0.8, lwd = 1.5) +
+  labs(x = expression("log"[10]*"(mean)"), y = expression("log"[10]* "(standard deviation)")) 
+variance_plot02 <- variance_plot01 
+ggsave(variance_plot02, file = paste0(output_folder, "human_EMTAB3929_scRNAseq_GeneExpressionVariance_E6.pdf"), width = 10, height = 5)
+```
