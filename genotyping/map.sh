@@ -22,7 +22,8 @@ do
    ((i=i%N)); ((i++==0)) && wait
    /work-zfs/rmccoy22/progs/STAR/bin/Linux_x86_64/STAR \
      --genomeDir /work-zfs/rmccoy22/resources/reference/star_index \
-     --readFilesCommand zcat /work-zfs/rmccoy22/rmccoy22/mCA/PRJEB11202_Petropolous/${cell}/${cell}.fastq.gz \
+     --readFilesCommand gunzip -c \
+     --readFilesIn /work-zfs/rmccoy22/rmccoy22/mCA/PRJEB11202_Petropolous/${cell}/${cell}.fastq.gz \
      --outFileNamePrefix /work-zfs/rmccoy22/rmccoy22/mCA/PRJEB11202_Petropolous/${cell}/${cell} \
      --outSAMtype BAM SortedByCoordinate & 
 done
