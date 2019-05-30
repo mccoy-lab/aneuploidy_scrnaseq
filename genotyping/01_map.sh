@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # map RNA-seq data in preparation for genotyping
 
