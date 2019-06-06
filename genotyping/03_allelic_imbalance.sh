@@ -136,3 +136,4 @@ do
 done
 )
 
+wait
