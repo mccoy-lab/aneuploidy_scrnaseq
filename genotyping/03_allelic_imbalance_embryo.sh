@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #SBATCH --partition=shared
 #SBATCH --job-name=allelic_imbalance_embryo
-#SBATCH --time=3:0:0
+#SBATCH --time=18:0:0
 #SBATCH --array=1-88%88
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=4
+#SBATCH --ntasks-per-node=16
 
 ml samtools
 ml htslib
@@ -28,8 +28,11 @@ samtools sort \
   -@ 8 \
   ${embryo}/${embryo}_merged.bam
 
+mkdir ${embryo}/tmp
+
 # add read group information
 picard AddOrReplaceReadGroups \
+  TMP_DIR=${embryo}/tmp \
   I=${embryo}/${embryo}_sorted.bam \
   O=${embryo}/${embryo}_reheader.bam \
   RGLB=${embryo} \
@@ -39,16 +42,18 @@ picard AddOrReplaceReadGroups \
 
 # mark duplicates
 picard MarkDuplicates \
+  TMP_DIR=${embryo}/tmp \
   I=${embryo}/${embryo}_reheader.bam \
   O=${embryo}/${embryo}_dedupped.bam \
   CREATE_INDEX=true \
   VALIDATION_STRINGENCY=SILENT \
   M=${embryo}/${embryo}.metrics
 
-samtools index ${embryo}/${embryo}_merged_reheader.bam
+samtools index ${embryo}/${embryo}_dedupped.bam
 
 # "split'n'trim" the reads and adjust mapping quality
-java -jar ~/work/progs/GenomeAnalysisTK-3.8-1-0-gf15c1c3ef/GenomeAnalysisTK.jar \
+java -Djava.io.tmpdir=/work-zfs/rmccoy22/rmccoy22/mCA/PRJEB11202_Petropolous/${embryo}/tmp/ \
+  -jar ~/work/progs/GenomeAnalysisTK-3.8-1-0-gf15c1c3ef/GenomeAnalysisTK.jar \
   -T SplitNCigarReads \
   -R /work-zfs/rmccoy22/resources/reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna \
   -I ${embryo}/${embryo}_dedupped.bam \
@@ -87,6 +92,19 @@ tabix -p vcf ${embryo}/${embryo}_AF.vcf.gz
 
 bgzip ${embryo}/${embryo}_knownSNP.vcf
 tabix -p vcf ${embryo}/${embryo}_knownSNP.vcf.gz
+
+~/work/progs/gatk-4.0.12.0/gatk \
+  VariantFiltration \
+  -R /work-zfs/rmccoy22/resources/reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna \
+  -V ${embryo}/${embryo}_knownSNP.vcf.gz \
+  -O ${embryo}/${embryo}_knownSNP_filtered.vcf \
+  -window 35 \
+  -cluster 3 \
+  --filter-name FS -filter "FS > 30.0" \
+  --filter-name QD -filter "QD < 2.0"
+
+bgzip ${embryo}/${embryo}_knownSNP_filtered.vcf
+tabix -p vcf ${embryo}/${embryo}_knownSNP_filtered.vcf.gz
 
 for cell_accession in ${accession_list}
 do
