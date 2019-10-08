@@ -1,0 +1,14 @@
+Lineage	EStage	EmbryoCount	CellCount
+Undefined	E3	13	78
+Undefined	E4	16	185
+ICM	E5	12	66
+Trophectoderm	E5	22	227
+Undefined	E5	5	67
+Epiblast	E6	7	25
+Intermediate	E6	11	36
+Primitive Endoderm	E6	4	8
+Trophectoderm	E6	17	336
+Epiblast	E7	7	20
+Intermediate	E7	8	32
+Primitive Endoderm	E7	7	22
+Trophectoderm	E7	17	379
