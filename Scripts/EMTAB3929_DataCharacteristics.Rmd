@@ -1,0 +1,76 @@
+---
+author: Margaret R. Starostik
+title: "EMTAB3929: Data Characteristics"
+output:
+  pdf_document:
+    latex_engine: xelatex
+mainfont: Arial
+monofont: Arial
+fontsize: 10pt
+geometry: margin = 1in
+header-includes:
+  \usepackage[dvipsnames]{xcolor}
+---
+
+```{r GenSetup, include = FALSE}
+# Ensure clean R environment
+rm(list=ls())
+
+# Change global default setting so every data frame created will not auto-convert to factors unless explicitly instructed
+options(stringsAsFactors = FALSE) 
+
+# Modify global options for compiling PDF
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff = 60), tidy = TRUE)
+
+# Source my collection of functions
+source("/Users/Margaret/Desktop/JHU/COURSEWORK/2018_Fall/Rotation02_RajivMcCoy/AneuploidyProject/Scripts/UsefulFunctions.R")
+
+# Load/install packages
+list_of_packages <- c("dplyr", "ggplot2")
+install_and_load_packages(list_of_packages)
+
+# Note that the edgeR package masks the scploid getCounts object. Resolve.
+getCounts <- scploid::getCounts
+```
+
+```{r ProjectSetup, include = FALSE}
+# Set up folders
+project_folder <- "/Users/Margaret/Desktop/JHU/COURSEWORK/2018_Fall/Rotation02_RajivMcCoy/AneuploidyProject/"
+
+# Load processed EMTAB3929 data
+load(paste0(project_folder, "ProcessedData/EMTAB3929_DataPrep.RData"))
+```
+
+## (1) Histogram showing the number of reads per cell that mapped to human reference genome GRCh38.84.
+```{r MappedReads, results = "asis", fig.align = "center", fig.cap = "Reads Mapped to GRCh38.84", out.width = "60%", dev = "pdf"}
+# (1) Generate histogram of the number of reads that mapped to reference genome GRCh38.84.
+mapping_plot01 <- ggplot(metasheet, aes(x = Sample, y = `Mapped Reads`, fill = EStage)) + geom_bar(stat = "identity") 
+mapping_plot02 <- mapping_plot01 + labs(title = "", x = "Cells", y = "Mapped Reads") + 
+  theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5))
+ggsave(paste0(project_folder, "Results/01_DataSummary/EMTAB3929_MappedReads.pdf"), plot = mapping_plot02, device = "pdf", width = 6, height = 4, units = "in")
+print(mapping_plot02)
+```
+
+## (2) Dot plot depicting sample size for each cell lineage used in this project.
+```{r DotPlot, results = "asis", fig.align = "center", fig.cap = "Sample Summary", out.width = "60%", dev = "pdf"}
+# (2) Generate dot plot summarizing the samples in this study
+dotplot_data <- as.data.frame(metasheet %>%
+                                group_by(`Revised lineage (this study)`, EStage) %>%
+                                summarise(EmbryoCount = length(unique(Embryo)),
+                                          CellCount = length(Cell)))
+colnames(dotplot_data)[1] <- "Lineage"
+dotplot_data$Lineage <- factor(dotplot_data$Lineage, levels = c("Undefined", "ICM", "Trophectoderm", "Intermediate", "Epiblast", "Primitive Endoderm"))
+
+dotplot01 <- ggplot(dotplot_data, aes(x = EStage, y = Lineage)) + geom_point(aes(size = EmbryoCount, color = CellCount))
+dotplot02 <- dotplot01 + labs(title = "", x = "\nDevelopmental Stage", y = "Cell Lineage\n") +
+  scale_color_continuous(name = "Cells") + scale_size_continuous(name = "Embryos")
+ggsave(paste0(project_folder, "Results/01_DataSummary/EMTAB3929_SampleSummary.pdf"), plot = dotplot02, device = "pdf", width = 8, height = 4.5, units = "in")
+print(dotplot02)
+```
+
+\pagebreak
+
+```{r SampleTable}
+knitr::kable(dotplot_data[order(dotplot_data$EStage), ], caption = "Sample Summary", row.names = FALSE)
+write.table(dotplot_data[order(dotplot_data$EStage), ], file = paste0(project_folder, "Results/01_DataSummary/EMTAB3929_SampleSummary.txt"), quote = FALSE, sep = "\t", row.names = FALSE)
+```
