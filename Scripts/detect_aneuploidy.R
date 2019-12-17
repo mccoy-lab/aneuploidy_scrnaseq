@@ -2,7 +2,7 @@ list_of_packages <- c("biomaRt", "BiocStyle", "broom", "cowplot", "data.table", 
                       "ggdendro", "ggrepel", "gmodels", "gplots", "gridExtra", "lme4", "MAST", "metap", 
                       "MultiAssayExperiment", "mppa", "plyr", "readxl", "Rtsne", "scales", "scater", 
                       "scran", "stringr", "tidyr", "TreeBH", "tools", "umap", "zoo", 
-                      "scploid", "dplyr")
+                      "scploid", "dplyr", "margins")
 
 # Source my collection of functions
 source("~/Desktop/AneuploidyProject/UsefulFunctions.R")
@@ -286,20 +286,25 @@ cell_fraction <- group_by(results[!duplicated(cell)], EStage, embryo) %>%
   summarize(., prop_aneuploid = mean(sig_cell), n = n()) %>%
   as.data.table()
 
-chr_fraction <- group_by(results, EStage, embryo, chr) %>%
-  summarize(., prop_aneuploid = mean(sig_chrom), n = n()) %>%
-  as.data.table()
-
-length(unique(chr_fraction[prop_aneuploid >= 0.75]$embryo))
-length(unique(chr_fraction[prop_aneuploid > 0 & prop_aneuploid < 0.75]$embryo))
-
-
 cell_fraction_plot <- ggplot(data = cell_fraction) +
   geom_histogram(aes(x = prop_aneuploid)) +
   theme_classic() +
   scale_fill_brewer(palette = "Dark2") +
   xlab("Prop. aneuploid cells") +
   ylab("Number of embryos")
+
+chr_fraction <- group_by(results, EStage, embryo, chr) %>%
+  summarize(., prop_aneuploid = mean(sig_chrom), n = n()) %>%
+  as.data.table()
+
+length(unique(chr_fraction[prop_aneuploid >= 0.75]$embryo))
+length(unique(chr_fraction[prop_aneuploid > 0 & prop_aneuploid < 0.75]$embryo))
+sum(unique(chr_fraction[prop_aneuploid >= 0.75]$embryo) %in% 
+    unique(chr_fraction[prop_aneuploid > 0 & prop_aneuploid < 0.75]$embryo))
+
+length(unique(results[sig_chrom == 1 & (abs(scploid_score - 1) > 0.2)]$chrom))
+length(unique(results[sig_chrom == 1 & (abs(scploid_score - 1) > 0.2)]$cell))
+length(unique(results[sig_chrom == 1 & (abs(scploid_score - 1) > 0.2)]$embryo))
 
 plot_grid(fdr_plot, cell_fraction_plot, labels = c('A', 'B'))
 
@@ -449,21 +454,26 @@ for (embryo_id in unique(results$embryo)) {
 
 ### statistical models of cell-type-specificity
 
-results[, num_estage := as.numeric(gsub("E", "", EStage)) - 3]
+results[, num_estage := scale(as.numeric(gsub("E", "", EStage)) - 3)]
 
 m1 <- glmer(data = results[!duplicated(cell)], 
-            formula = sig_cell ~ scale(num_estage) + (1 | embryo) + lineage, 
+            formula = sig_cell ~ num_estage + (1 | embryo) + lineage, 
             family = binomial)
 
-m0 <- glmer(data = results[!duplicated(cell)], 
-            formula = sig_cell ~ scale(num_estage) + (1 | embryo), 
-            family = binomial)
+mx <- margins(m1, type = "response", variables = "lineage")
+b <- summary(mx)
+cov_mat <- attr(mx, "vcov")
+k <- diag(nrow = ncol(cov_mat))
+kvar <- t(k) %*% cov_mat %*% k
+kb <- k %*% b$AME
+my_chi <- t(kb) %*% solve(kvar) %*% kb
+pchisq(my_chi[1, 1], df = ncol(cov_mat), lower.tail = F)
 
-anova(m1, m0, test = "Chisq")
-
+results[, is_trophectoderm := lineage == "Trophectoderm"]
 te_enrich <- glmer(data = results[!duplicated(cell) & lineage != "Undefined"], 
-                   formula = sig_cell ~ scale(num_estage) + (1 | embryo)  + (lineage == "Trophectoderm"), 
+                   formula = sig_cell ~ num_estage + (1 | embryo)  + is_trophectoderm, 
                    family = binomial)
+summary(margins(te_enrich))
 
 std <- function(x) sd(x) / sqrt(length(x))
 
@@ -492,36 +502,35 @@ by_celltype_plot <- ggplot(data = aneuploid_by_lineage, aes(x = lineage, y = pro
         legend.position = "none") +
   ylim(0, 1)
 
+results$lineage <- factor(results$lineage, ordered = FALSE)
+results$lineage <- relevel(results$lineage, ref = "Undefined")
+
 enrich_model <- glmer(data = results[!duplicated(cell)], 
-  formula = sig_cell ~ -1 + (1 | embryo) + lineage, 
+  formula = sig_cell ~ (1 | embryo) + lineage, 
   family = binomial)
 
-enrich_coef <- tidy(enrich_model) %>%
-  filter(group == "fixed") %>%
-  as.data.table()
-
-enrich_ci <- tidy(confint(enrich_model)) %>%
+enrich_coef <- summary(margins(enrich_model, type = "response", data = results[!duplicated(cell)])) %>%
   as.data.table() %>%
-  setnames(., c("term", "ll", "ul"))
+  setnames(., "factor", "term")
 
-enrich_coef <- merge(enrich_coef, enrich_ci, "term")
 enrich_coef[, lineage := gsub("lineage", "", term)]
-
 enrich_coef$lineage <- str_wrap(enrich_coef$lineage, width = 10)
 
 enrich_coef$lineage <- factor(enrich_coef$lineage, 
-                                       levels = c("Undefined", "ICM", "Trophectoderm",
+                                       levels = c("Undefined", "ICM",
                                                   "Intermediate",
                                                   "Epiblast", "Primitive\nEndoderm"))
 
-enrichment_plot <- ggplot(data = enrich_coef, aes(x = lineage, y = invlogit(estimate), 
-                                                  ymin = invlogit(ll), ymax = invlogit(ul),
-                                                  fill = lineage)) +
-  geom_bar(stat = "identity") +
+enrichment_plot <- ggplot(data = enrich_coef, aes(x = lineage, y = AME, 
+                                                  ymin = lower, ymax = upper,
+                                                  color = lineage)) +
+  geom_point() +
   geom_errorbar(width = 0.25) +
-  scale_fill_brewer(palette = "Dark2") +
-  ylab("Est. aneuploidy rate (95% CI)") +
+  ylab("AME vs. trophectoderm (95% CI)") +
   xlab("Cell type") +
   theme_classic() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
-  ylim(0, 1)
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        legend.position = "none") +
+  geom_hline(yintercept = 0, lty = "dashed", color = "gray") +
+  scale_color_manual(values = c("#1b9e77", "#d95f02", "#e7298a", "#66a61e", "#e6ab02"))
+  
