@@ -334,6 +334,18 @@ by_chrom_plot <- ggplot(data = aneuploid_by_chr, aes(x = n_genes , y = aneuploid
   geom_point() +
   geom_label_repel(size = 4)
 
+m1 <- glmer(data = results, formula = (sig_chrom == 1) ~ (1 | embryo / cell) + (1 | lineage) + chr, family = binomial, nAGQ = 0)
+m0 <- glmer(data = results, formula = (sig_chrom == 1) ~ (1 | embryo / cell) + (1 | lineage), family = binomial, nAGQ = 0)
+anova(m1, m0, test = "Chisq") # embryo-specific models; to average over levels of random effect, need to extract average marginal effects as below
+mx <- margins(m1, type = "response", variables = "chr")
+b <- summary(mx)
+cov_mat <- attr(mx, "vcov")
+k <- diag(nrow = ncol(cov_mat))
+kvar <- t(k) %*% cov_mat %*% k
+kb <- k %*% b$AME
+my_chi <- t(kb) %*% solve(kvar) %*% kb
+pchisq(my_chi[1, 1], df = ncol(cov_mat), lower.tail = F)
+
 ### plot results
 results[, monosomy := scploid_z < 0]
 results[, ploidy := 2]
@@ -533,4 +545,3 @@ enrichment_plot <- ggplot(data = enrich_coef, aes(x = lineage, y = AME,
         legend.position = "none") +
   geom_hline(yintercept = 0, lty = "dashed", color = "gray") +
   scale_color_manual(values = c("#1b9e77", "#d95f02", "#e7298a", "#66a61e", "#e6ab02"))
-  
