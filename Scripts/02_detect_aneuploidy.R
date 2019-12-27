@@ -1,14 +1,24 @@
-list_of_packages <- c("biomaRt", "BiocStyle", "broom", "cowplot", "data.table", "devtools", 
-                      "ggdendro", "ggrepel", "gmodels", "gplots", "gridExtra", "lme4", "MAST", "metap", 
-                      "MultiAssayExperiment", "mppa", "plyr", "readxl", "Rtsne", "scales", "scater", 
-                      "scran", "stringr", "tidyr", "TreeBH", "tools", "umap", "zoo", 
-                      "scploid", "dplyr", "margins", "mixtools", "SMITE", "survcomp", "here",
-                      "monocle3", "SummarizedExperiment", "MultiAssayExperiment")
+list_of_packages <- c("BiocStyle", "biomaRt", "broom", "cowplot", "data.table", "devtools", 
+                      "dplyr", "ggdendro", "ggrepel", "gmodels", "gplots", "gridExtra", 
+                      "here", "lme4", "margins", "MAST", "metap", "mixtools", "monocle3", 
+                      "mppa", "MultiAssayExperiment", "MultiAssayExperiment", "plyr", 
+                      "readxl", "Rtsne", "scales", "scater", "scploid", "scran", "SMITE", 
+                      "stringr", "SummarizedExperiment", "survcomp", "tidyr", "tools", 
+                      "TreeBH", "umap", "zoo")
 
-# Source my collection of functions
-source(here("UsefulFunctions.R"))
+# Easily install and load packages
+install_and_load_packages <- function(pkg){
+  new_packages <- list_of_packages[!(list_of_packages %in% installed.packages()[, "Package"])]
+  if(length(new_packages))
+    install.packages(new_packages, dependencies = TRUE)
+  sapply(list_of_packages, require, character.only = TRUE)
+}
 
 install_and_load_packages(list_of_packages)
+
+# over-ride masked functions
+here <- here::here
+summarize <- dplyr::summarize
 
 # Change global default setting so every data frame created will not auto-convert to factors unless explicitly instructed
 options(stringsAsFactors = FALSE) 
@@ -131,8 +141,8 @@ ase[, maxCount := pmax(refCount, altCount)]
 # summarize ASE per cell-chromosome
 ase_by_chr <- group_by(ase, cell, contig) %>%
   summarize(., allelic_ratio = sum(minCount) / sum(totalCount), 
-               min_count_sum = sum(minCount), 
-               total_reads = sum(totalCount)) %>%
+            min_count_sum = sum(minCount), 
+            total_reads = sum(totalCount)) %>%
   as.data.table()
 
 # merge with expression data
@@ -208,26 +218,26 @@ vary_fdr <- function(fdr, results_dt) {
   calls <- suppressWarnings(get_TreeBH_selections(results$fisher_p,
                                                   sc_groups,
                                                   q = c(fdr, fdr, fdr)))
-
+  
   results_dt[, sig_embryo := calls[, 1]]
   results_dt[, sig_cell := calls[, 2]]
   results_dt[, sig_chrom := calls[, 3]]
-
+  
   results_dt[cell %in% unique(results_dt[sig_cell == 1]$cell), sig_cell := 1]
   results_dt[embryo %in% unique(results_dt[sig_embryo == 1]$embryo), sig_embryo := 1]
-
+  
   fdr_table <- data.table(
-      table(results_dt[!duplicated(chrom)]$sig_chrom),
-      table(results_dt[!duplicated(cell)]$sig_cell),
-      table(results_dt[!duplicated(embryo)]$sig_embryo),
-      FDR = fdr) %>%
+    table(results_dt[!duplicated(chrom)]$sig_chrom),
+    table(results_dt[!duplicated(cell)]$sig_cell),
+    table(results_dt[!duplicated(embryo)]$sig_embryo),
+    FDR = fdr) %>%
     setnames(c("ploidy", "n_chromosomes", "ploidy_2", "n_cells", "ploidy_3", "n_embryos", "FDR"))
   return(fdr_table)
 }
 
 sig_by_fdr <- do.call(rbind, 
                       lapply(sort(unique(c(rev(1*10^-(1:5)), 5e-3, seq(1, 10, 2) * 10^-2, seq(0.2, 0.5, 0.1)))), 
-                      function(x) vary_fdr(x, results)))
+                             function(x) vary_fdr(x, results)))
 
 fdr_plot <- ggplot(data = sig_by_fdr[ploidy == 1 & FDR <= 0.5]) +
   geom_line(aes(x = FDR, y = n_chromosomes / sum(sig_by_fdr[1:2,]$n_chromosomes), color = "Chromosomes"), lwd = 1) +
@@ -280,7 +290,7 @@ chr_fraction <- group_by(results, EStage, embryo, chr) %>%
 length(unique(chr_fraction[prop_aneuploid >= 0.75]$embryo))
 length(unique(chr_fraction[prop_aneuploid > 0 & prop_aneuploid < 0.75]$embryo))
 sum(unique(chr_fraction[prop_aneuploid >= 0.75]$embryo) %in% 
-    unique(chr_fraction[prop_aneuploid > 0 & prop_aneuploid < 0.75]$embryo))
+      unique(chr_fraction[prop_aneuploid > 0 & prop_aneuploid < 0.75]$embryo))
 
 plot_grid(fdr_plot, cell_fraction_plot, labels = c('A', 'B'))
 
@@ -376,7 +386,7 @@ plot_mca <- function(embryo_id, combine = FALSE, legend = TRUE, cluster_method =
   
   dt_to_plot <- results[embryo == embryo_id]
   dt_to_plot$cell <- factor(dt_to_plot$cell, levels = sample_order)
-   
+  
   exp_heatmap <- ggplot(data = dt_to_plot, aes(x = chr_num, y = cell, fill = scploid_z)) +
     geom_tile() +
     theme_bw() +
@@ -457,10 +467,6 @@ plot_c <- plot_mca("E7.17", combine = TRUE, cluster_method = "average", dist_met
 plot_d <- plot_mca("E7.5", combine = TRUE, cluster_method = "average", dist_method = "euclidean")
 plot_grid(plot_a, plot_b, plot_c, plot_d, ncol = 2, nrow = 2, labels = c('A', 'B', 'C', 'D'))
 
-plot_mca("E7.5", combine = TRUE, cluster_method = "average", dist_method = "euclidean")
-plot_mca("E7.17", combine = TRUE, cluster_method = "average", dist_method = "euclidean")
-
-
 for (embryo_id in unique(results$embryo)) {
   pdf(file = paste0("~/Downloads/mosaic_aneuploidy_plots/", embryo_id, ".pdf"), height = 4, width = 6)
   try(print(plot_mca_sig(embryo_id)))
@@ -496,7 +502,7 @@ aneuploid_by_lineage <- group_by(results[!duplicated(cell)], lineage) %>%
   summarize(., n_euploid = sum(sig_cell == 0), n_aneuploid = sum(sig_cell == 1), total = n())
 
 aneuploid_by_lineage_ci <- mapply(function(x, y) tidy(prop.test(x, y)), 
-       aneuploid_by_lineage$n_aneuploid, aneuploid_by_lineage$total) %>%
+                                  aneuploid_by_lineage$n_aneuploid, aneuploid_by_lineage$total) %>%
   t() %>%
   as.data.table()
 
@@ -528,8 +534,8 @@ results$lineage <- factor(results$lineage, ordered = FALSE)
 results$lineage <- relevel(results$lineage, ref = "Trophectoderm")
 
 enrich_model <- glmer(data = results[!duplicated(cell)], 
-  formula = sig_cell ~ (1 | embryo) + lineage, 
-  family = binomial)
+                      formula = sig_cell ~ (1 | embryo) + lineage, 
+                      family = binomial)
 
 enrich_coef <- summary(margins(enrich_model, type = "response", data = results[!duplicated(cell)])) %>%
   as.data.table() %>%
@@ -539,9 +545,9 @@ enrich_coef[, lineage := gsub("lineage", "", term)]
 enrich_coef$lineage <- str_wrap(enrich_coef$lineage, width = 10)
 
 enrich_coef$lineage <- factor(enrich_coef$lineage, 
-                                       levels = c("Undefined", "ICM",
-                                                  "Intermediate",
-                                                  "Epiblast", "Primitive\nEndoderm"))
+                              levels = c("Undefined", "ICM",
+                                         "Intermediate",
+                                         "Epiblast", "Primitive\nEndoderm"))
 
 enrichment_plot <- ggplot(data = enrich_coef, aes(x = lineage, y = AME, 
                                                   ymin = lower, ymax = upper,
@@ -555,7 +561,7 @@ enrichment_plot <- ggplot(data = enrich_coef, aes(x = lineage, y = AME,
         legend.position = "none") +
   geom_hline(yintercept = 0, lty = "dashed", color = "gray") +
   scale_color_manual(values = c("#1b9e77", "#d95f02", "#e7298a", "#66a61e", "#e6ab02"))
-  
+
 
 ### dimension reduction visualization
 
@@ -617,8 +623,8 @@ cds$is_aneuploid <- as.character(cds$sig_cell)
 cds$is_aneuploid <- revalue(cds$is_aneuploid, c("0" = "Euploid", "1" = "Aneuploid"))
 
 umap_aneuploid_12 <- plot_cells(cds, x = 1, y = 2, color_cells_by = "is_aneuploid", cell_size = 1, 
-                             label_groups_by_cluster = FALSE, show_trajectory_graph = FALSE,
-                             label_cell_groups = FALSE) + 
+                                label_groups_by_cluster = FALSE, show_trajectory_graph = FALSE,
+                                label_cell_groups = FALSE) + 
   theme_classic() +
   theme(legend.position = "none") +
   scale_color_manual(values = c("#4e79a7", "#f28e2b"))
@@ -633,7 +639,7 @@ umap_aneuploid_23 <- plot_cells(cds, x = 2, y = 3, color_cells_by = "is_aneuploi
 grid_left <- plot_grid(umap_12, umap_aneuploid_12, by_celltype_plot, align = "v", axis = "lr", nrow = 3, 
                        labels = c("A", "C", "E"), rel_heights = c(0.8, 0.8, 1))
 grid_right <- plot_grid(umap_23, umap_aneuploid_23, enrichment_plot, align = "v", axis = "lr", nrow = 3,
-                       labels = c("B", "D", "F"), rel_heights = c(0.8, 0.8, 1))
+                        labels = c("B", "D", "F"), rel_heights = c(0.8, 0.8, 1))
 plot_grid(grid_left, grid_right, ncol = 2, rel_widths = c(0.6, 1))
 
 plot_cells_3d(cds, color_cells_by = "lineage", cell_size = 50, 
