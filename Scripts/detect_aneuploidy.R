@@ -2,25 +2,19 @@ list_of_packages <- c("biomaRt", "BiocStyle", "broom", "cowplot", "data.table", 
                       "ggdendro", "ggrepel", "gmodels", "gplots", "gridExtra", "lme4", "MAST", "metap", 
                       "MultiAssayExperiment", "mppa", "plyr", "readxl", "Rtsne", "scales", "scater", 
                       "scran", "stringr", "tidyr", "TreeBH", "tools", "umap", "zoo", 
-                      "scploid", "dplyr", "margins")
+                      "scploid", "dplyr", "margins", "mixtools", "SMITE", "survcomp", "here",
+                      "monocle3", "SummarizedExperiment", "MultiAssayExperiment")
 
 # Source my collection of functions
-source("~/Desktop/AneuploidyProject/UsefulFunctions.R")
+source(here("UsefulFunctions.R"))
 
 install_and_load_packages(list_of_packages)
 
-# Resolve masked functions
-# getCounts <- scploid::getCounts
-
-# Ensure clean R environment
-rm(list=ls())
 # Change global default setting so every data frame created will not auto-convert to factors unless explicitly instructed
 options(stringsAsFactors = FALSE) 
 
-# Set up folders
-project_folder <- "~/Desktop/AneuploidyProject/"
 # Load processed EMTAB3929 data and check data
-load(paste0(project_folder, "ProcessedData/EMTAB3929_DataPrep.RData"))
+load(here("ProcessedData/EMTAB3929_DataPrep.RData"))
 dim(annotation) # 56,400 genes
 dim(filtered_counts) # 2,991 genes and 1,481 cells
 dim(filtered_cpm) # 2,991 genes and 1,481 cells
@@ -30,8 +24,9 @@ length(unique(metasheet$Embryo)) # 88 embryos
 
 emtab3929_counts <- emtab3929_counts[, colnames(emtab3929_counts) %in% metasheet$Sample]
 emtab3929_counts <- emtab3929_counts[order(rownames(emtab3929_counts)), order(colnames(emtab3929_counts))]
-annotation <- annotation[order(annotation$ensembl_gene_id), ]
-metasheet <- metasheet[order(metasheet$Sample), ]
+annotation <- annotation[order(annotation$ensembl_gene_id),] %>%
+  as.data.table()
+metasheet <- metasheet[order(metasheet$Sample),]
 
 # to split data, use annotations from Stirparo et al. 2018
 metasheet$Group <- paste0(metasheet$EStage, "_", metasheet$`Revised lineage (this study)`)
@@ -40,17 +35,14 @@ metasheet <- metasheet %>%
 metasheet[, qc_pass := (`Percent Mapped` > quantile(`Percent Mapped`, 0.1) & `Mapped Reads` > quantile(`Mapped Reads`, 0.1))]
 metasheet[, Embryo := gsub("_", ".", Embryo)]
 
-annotation <- annotation %>%
-  as.data.table()
-
-## run scploid
+## create scploid object
 ploidytest_dt <- makeAneu(counts = emtab3929_counts[, metasheet[qc_pass == TRUE]$Sample],
                           genes = annotation$ensembl_gene_id,
                           chrs = annotation$chromosome_name,
                           cellNames = metasheet[qc_pass == TRUE]$Sample,
-                          cellGroups = metasheet[qc_pass == TRUE]$Group) # split data by EStage and tissue type
+                          cellGroups = metasheet[qc_pass == TRUE]$Group) # split data by EStage and cell type
 
-# data split into 13 subsets, one for each EStage_tissue combination
+# data split into 13 subsets, one for each EStage_celltype combination
 spt <- splitCellsByGroup(ploidytest_dt) 
 
 # drop groups that fail scploid QC
@@ -99,7 +91,7 @@ plot_grid(pca_fig, qc_fig, labels = c("A", "B"), ncol = 1, rel_heights = c(1, 0.
 # subset data to stage/cell-type groups that pass QC
 spt <- spt[names(spt) %in% groups_qc_pass]
 
-# infer aneuploidy across the remaining groups
+# run scploid
 expression_results <- do.call(rbind, lapply(spt, calcAneu)) %>%
   as.data.table()
 expression_results[, chr := paste0("chr", chr)]
@@ -115,8 +107,8 @@ setnames(expression_results, "score", "scploid_score")
 setnames(expression_results, "p", "scploid_p")
 
 ## add ASE data
-file_list <- list.files("~/Desktop/ase_tables", pattern = "*.table", full.names = TRUE)
-mappings <- fread("~/Desktop/ase_tables/E-MTAB-3929.sdrf.txt")[, c(1, 31)] %>%
+file_list <- list.files(here("ase_tables"), pattern = "*.table", full.names = TRUE)
+mappings <- fread(here("ase_tables/E-MTAB-3929.sdrf.txt"))[, c(1, 31)] %>%
   setnames(., c("cell", "accession"))
 
 read_ase <- function(file_name, metadata) {
@@ -135,13 +127,6 @@ ase[, cell := gsub("_", ".", cell)]
 ase[, embryo_snp_id := paste(embryo, snp_id, sep = "_")]
 ase[, minCount := pmin(refCount, altCount)]
 ase[, maxCount := pmax(refCount, altCount)]
-
-# filter on allele frequency in 1000 Genomes (i.e., is this a known SNP?)
-af <- fread("~/Downloads/1kg_grch38_af.txt", header = F) %>%
-  setnames(., c("snp_id", "kg_af"))
-af <- af[kg_af > 0.01 & kg_af < 0.99]
-ase <- merge(ase, af, "snp_id") %>%
-  setorder(., embryo, cell, contig, position)
 
 # summarize ASE per cell-chromosome
 ase_by_chr <- group_by(ase, cell, contig) %>%
@@ -167,14 +152,14 @@ results[is.na(allelic_ratio), allelic_ratio := 0]
 results[is.na(allelic_ratio), total_reads := 0]
 
 # correct allelic imbalance based on converage
-results[, resid_allelic_ratio := resid(lm(data = results, formula = allelic_ratio ~ log10(mapped_reads)))]
+results[, resid_allelic_ratio := resid(lm(data = results, formula = allelic_ratio ~ mapped_reads))]
 
-# compute allelic imbalance z-scores and p-values
+# estimate variance and compute allelic imbalance z-scores
 ase_iqr <- quantile(results$allelic_ratio, c(0.25, 0.75))
 iqr_indices <- which(results$allelic_ratio > ase_iqr[1] & results$allelic_ratio < ase_iqr[2])
 m_iqr <- results$resid_allelic_ratio[iqr_indices]
 null_allelic_ratio <- mean(m_iqr)
-null_var_allelic_ratio <- {IQR(results$resid_allelic_ratio)/(2*qnorm(.75))}^2
+null_var_allelic_ratio <- {IQR(results$resid_allelic_ratio)/(2 * qnorm(.75))} ^ 2
 results[, ase_z := (resid_allelic_ratio - null_allelic_ratio) / sqrt(null_var_allelic_ratio)]
 results[, ase_p := pnorm(ase_z)]
 
@@ -187,7 +172,7 @@ scploid_ase_overlap <- function(pval_threshold) {
     as.data.table() %>%
     setnames(., c("ase", "expression", "n")) %>%
     dcast.data.table(formula = ase ~ expression, value.var = "n") %>%
-    select("FALSE", "TRUE") %>%
+    dplyr::select("FALSE", "TRUE") %>%
     fisher.test() %>%
     tidy() %>%
     mutate(., threshold = pval_threshold) %>%
@@ -195,7 +180,8 @@ scploid_ase_overlap <- function(pval_threshold) {
   return(fisher_exact_results)
 }
 
-enrichment_results <- do.call(rbind, lapply(c(5e-1, 1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4), function(x) try(scploid_ase_overlap(x))))
+enrichment_results <- do.call(rbind, lapply(c(3.2e-1, 1e-1, 3.2e-2, 1e-2, 3.2e-3, 1e-3, 
+                                              3.2e-4, 1e-4), function(x) try(scploid_ase_overlap(x))))
 
 ggplot(data = enrichment_results, aes(x = threshold, y = estimate, ymin = conf.low, ymax = conf.high)) + 
   geom_point() +
@@ -206,30 +192,20 @@ ggplot(data = enrichment_results, aes(x = threshold, y = estimate, ymin = conf.l
   xlab("P-value threshold") +
   ylab("Odds Ratio")
 
-# combine p-values
-simes_wrapper <- function(pval_1, pval_2) {
-  return(simes.test(c(pval_1, pval_2)))
+fisher_wrapper <- function(pval_1, pval_2, wt_1 = 1, wt_2 = 1) {
+  return(tryCatch(combine.test(p = c(pval_1, pval_2), weight = c(wt_1, wt_2), method = "fisher"), error = function(e) NA))
 }
 
-fisher_wrapper <- function(pval_1, pval_2) {
-  return(sumlog(c(pval_1, pval_2))$p)
-}
-
-stouffer_wrapper <- function(pval_1, pval_2) {
-  return(tryCatch(sumz(c(pval_1, pval_2))$p[1, 1], error = function(e) NA))
-}
-
-results[, simes_p := mapply(simes_wrapper, results$scploid_p, results$ase_p)]
-results[, fisher_p := mapply(fisher_wrapper, results$scploid_p, results$ase_p)]
-results[, stouffer_p := mapply(stouffer_wrapper, results$scploid_p, results$ase_p)]
-results[is.na(stouffer_p), stouffer_p := 1]
+# impose effect size threshold, consistent with Griffiths et al.; set p-values to 1
+results[, scploid_effect_p := scploid_p]
+results[(scploid_score > 0.8 & scploid_score < 1.2), scploid_effect_p := 1]
+results[, fisher_p := mapply(fisher_wrapper, results$ase_p, results$scploid_effect_p)]
 
 # control the FDR with TreeBH
-
 vary_fdr <- function(fdr, results_dt) {
   message(fdr)
   sc_groups <- as.matrix(results[, c("embryo", "cell", "chrom")])
-  calls <- suppressWarnings(get_TreeBH_selections(results$stouffer_p,
+  calls <- suppressWarnings(get_TreeBH_selections(results$fisher_p,
                                                   sc_groups,
                                                   q = c(fdr, fdr, fdr)))
 
@@ -263,15 +239,15 @@ fdr_plot <- ggplot(data = sig_by_fdr[ploidy == 1 & FDR <= 0.5]) +
   theme(legend.position = "none") +
   ylim(0, 1) +
   xlim(0, 0.75) + 
-  annotate(geom = "text", x = 0.52, y = 0.92, label = "Embryos", hjust = "left") +
-  annotate(geom = "text", x = 0.52, y = 0.53, label = "Cells", hjust = "left") +
-  annotate(geom = "text", x = 0.52, y = 0.17, label = "Chromosomes", hjust = "left") +
+  annotate(geom = "text", x = 0.52, y = 0.91, label = "Embryos", hjust = "left") +
+  annotate(geom = "text", x = 0.52, y = 0.51, label = "Cells", hjust = "left") +
+  annotate(geom = "text", x = 0.52, y = 0.11, label = "Chromosomes", hjust = "left") +
   scale_color_brewer(palette = "Dark2")
 
-# set FDR = 10%
-fdr <- 0.1
+# set FDR = 1%
+fdr <- 0.01
 sc_groups <- as.matrix(results[, c("embryo", "cell", "chrom")])
-calls <- suppressWarnings(get_TreeBH_selections(results$stouffer_p,
+calls <- suppressWarnings(get_TreeBH_selections(results$fisher_p,
                                                 sc_groups,
                                                 q = c(fdr, fdr, fdr)))
 
@@ -282,12 +258,16 @@ results[, sig_chrom := calls[, 3]]
 results[cell %in% unique(results[sig_cell == 1]$cell), sig_cell := 1]
 results[embryo %in% unique(results[sig_embryo == 1]$embryo), sig_embryo := 1]
 
+length(unique(results[sig_chrom == 1]$chrom))
+length(unique(results[sig_chrom == 1]$cell))
+length(unique(results[sig_chrom == 1]$embryo))
+
 cell_fraction <- group_by(results[!duplicated(cell)], EStage, embryo) %>%
   summarize(., prop_aneuploid = mean(sig_cell), n = n()) %>%
   as.data.table()
 
 cell_fraction_plot <- ggplot(data = cell_fraction) +
-  geom_histogram(aes(x = prop_aneuploid)) +
+  geom_histogram(aes(x = prop_aneuploid), bins = 30) +
   theme_classic() +
   scale_fill_brewer(palette = "Dark2") +
   xlab("Prop. aneuploid cells") +
@@ -301,10 +281,6 @@ length(unique(chr_fraction[prop_aneuploid >= 0.75]$embryo))
 length(unique(chr_fraction[prop_aneuploid > 0 & prop_aneuploid < 0.75]$embryo))
 sum(unique(chr_fraction[prop_aneuploid >= 0.75]$embryo) %in% 
     unique(chr_fraction[prop_aneuploid > 0 & prop_aneuploid < 0.75]$embryo))
-
-length(unique(results[sig_chrom == 1 & (abs(scploid_score - 1) > 0.2)]$chrom))
-length(unique(results[sig_chrom == 1 & (abs(scploid_score - 1) > 0.2)]$cell))
-length(unique(results[sig_chrom == 1 & (abs(scploid_score - 1) > 0.2)]$embryo))
 
 plot_grid(fdr_plot, cell_fraction_plot, labels = c('A', 'B'))
 
@@ -332,7 +308,9 @@ by_chrom_plot <- ggplot(data = aneuploid_by_chr, aes(x = n_genes , y = aneuploid
   xlab("Number of protein-coding genes") +
   ylab("Number of aneuploid cells") +
   geom_point() +
-  geom_label_repel(size = 4)
+  geom_label_repel(size = 4) +
+  ylim(0, 125) +
+  xlim(0, 2250)
 
 m1 <- glmer(data = results, formula = (sig_chrom == 1) ~ (1 | embryo / cell) + (1 | lineage) + chr, family = binomial, nAGQ = 0)
 m0 <- glmer(data = results, formula = (sig_chrom == 1) ~ (1 | embryo / cell) + (1 | lineage), family = binomial, nAGQ = 0)
@@ -346,15 +324,38 @@ kb <- k %*% b$AME
 my_chi <- t(kb) %*% solve(kvar) %*% kb
 pchisq(my_chi[1, 1], df = ncol(cov_mat), lower.tail = F)
 
-### plot results
-results[, monosomy := scploid_z < 0]
+# cluster with k-means, assign clusters to monosomy and trisomy
+km <- results[sig_chrom == 1, c("scploid_z", "ase_z")] %>%
+  kmeans(centers = 2)
+km_clusters <- results[sig_chrom == 1, c("chrom", "scploid_z", "ase_z")]
+km_clusters[, cluster := km$cluster]
+
+results <- merge(results, km_clusters[, c("chrom", "cluster")], "chrom", all.x = TRUE)
+
 results[, ploidy := 2]
-results[allelic_ratio < 0.1, monosomy := TRUE]
-results[sig_chrom == 1 & monosomy == TRUE, ploidy := 1]
-results[sig_chrom == 1 & monosomy == FALSE, ploidy := 3]
+if (mean(results[cluster == 1]$ase_z) < mean(results[cluster == 2]$ase_z)) {
+  results[cluster == 1, ploidy := 1]
+  results[cluster == 2, ploidy := 3] 
+} else {
+  results[cluster == 2, ploidy := 1]
+  results[cluster == 1, ploidy := 3] 
+}
+
+ggplot() +
+  geom_point(data = results[ploidy == 2], aes(x = scploid_z, y = ase_z, col = "disomy"), size = 0.3) +
+  geom_point(data = results[ploidy == 1], aes(x = scploid_z, y = ase_z, col = "monosomy"), size = 0.3) +
+  geom_point(data = results[ploidy == 3], aes(x = scploid_z, y = ase_z, col = "trisomy"), size = 0.3) +
+  theme_classic() +
+  scale_color_manual(name = "", values = c("gray", "blue", "red")) +
+  xlab("scploid z-score") +
+  ylab("Allelic imbalance z-score")
+
+# plot aneuploidy heatmaps for individual embryos
+
 results[, chr_num := gsub("chr", "", chr)]
 results$chr_num <- factor(results$chr_num, levels = 1:22)
-results[, log_stouffer_p := -log10(stouffer_p)]
+results[, log_fisher_p := -log10(fisher_p)]
+results[, monosomy := scploid_z < 0 | ase_z < -3]
 
 plot_mca <- function(embryo_id, combine = FALSE, legend = TRUE, cluster_method = "ward.D2", dist_method = "euclidean") {
   heatmap_data <- pivot_wider(results[(embryo == embryo_id), c("chr_num", "cell", "ploidy")], names_from = chr_num, values_from = ploidy)
@@ -392,7 +393,7 @@ plot_mca <- function(embryo_id, combine = FALSE, legend = TRUE, cluster_method =
     ylab("Cell") +
     theme(axis.text.y = element_blank(), panel.grid = element_blank())
   
-  heatmap <- ggplot(data = dt_to_plot, aes(x = chr_num, y = cell, fill = monosomy, alpha = log_stouffer_p + 1)) +
+  heatmap <- ggplot(data = dt_to_plot, aes(x = chr_num, y = cell, fill = monosomy, alpha = log_fisher_p + 1)) +
     geom_tile() +
     theme_bw() +
     scale_fill_manual(name = "", values = c("red", "blue"), labels = c("Trisomy", "Monosomy")) +
@@ -427,9 +428,9 @@ plot_mca_sig <- function(embryo_id) {
   
   dt_to_plot <- results[embryo == embryo_id]
   dt_to_plot$cell <- factor(dt_to_plot$cell, levels = sample_order)
-  dt_to_plot[, polarized_log_stouffer_p := log_stouffer_p]
-  dt_to_plot[monosomy == TRUE, polarized_log_stouffer_p := -1 * log_stouffer_p]
-  dt_to_plot[allelic_ratio < 0.1, polarized_log_stouffer_p := -1 * log_stouffer_p]
+  dt_to_plot[, polarized_log_fisher_p := log_fisher_p]
+  dt_to_plot[monosomy == TRUE, polarized_log_fisher_p := -1 * log_fisher_p]
+  dt_to_plot[allelic_ratio < 0.1, polarized_log_fisher_p := -1 * log_fisher_p]
   
   dt_to_plot$ploidy_factor <- factor(dt_to_plot$ploidy, levels = c(1, 2, 3))
   
@@ -450,13 +451,15 @@ for (embryo_id in unique(results$embryo)) {
   dev.off()
 }
 
-plot_a <- plot_mca("E7.3", combine = TRUE, cluster_method = "ward.D2", dist_method = "euclidean")
-plot_b <- plot_mca("E5.13", combine = TRUE, cluster_method = "ward.D2", dist_method = "euclidean")
-plot_c <- plot_mca("E7.17", combine = TRUE, cluster_method = "ward.D2", dist_method = "euclidean")
-plot_d <- plot_mca("E7.5", combine = TRUE, cluster_method = "ward.D2", dist_method = "euclidean")
+plot_a <- plot_mca("E7.3", combine = TRUE, cluster_method = "average", dist_method = "euclidean")
+plot_b <- plot_mca("E5.13", combine = TRUE, cluster_method = "average", dist_method = "euclidean")
+plot_c <- plot_mca("E7.17", combine = TRUE, cluster_method = "average", dist_method = "euclidean")
+plot_d <- plot_mca("E7.5", combine = TRUE, cluster_method = "average", dist_method = "euclidean")
 plot_grid(plot_a, plot_b, plot_c, plot_d, ncol = 2, nrow = 2, labels = c('A', 'B', 'C', 'D'))
 
-plot_mca("E7.5", combine = FALSE)
+plot_mca("E7.5", combine = TRUE, cluster_method = "average", dist_method = "euclidean")
+plot_mca("E7.17", combine = TRUE, cluster_method = "average", dist_method = "euclidean")
+
 
 for (embryo_id in unique(results$embryo)) {
   pdf(file = paste0("~/Downloads/mosaic_aneuploidy_plots/", embryo_id, ".pdf"), height = 4, width = 6)
@@ -490,8 +493,17 @@ summary(margins(te_enrich))
 std <- function(x) sd(x) / sqrt(length(x))
 
 aneuploid_by_lineage <- group_by(results[!duplicated(cell)], lineage) %>%
-  summarize(., proportion_aneuploid = mean(sig_cell), stderr_aneuploid = std(sig_cell)) %>%
+  summarize(., n_euploid = sum(sig_cell == 0), n_aneuploid = sum(sig_cell == 1), total = n())
+
+aneuploid_by_lineage_ci <- mapply(function(x, y) tidy(prop.test(x, y)), 
+       aneuploid_by_lineage$n_aneuploid, aneuploid_by_lineage$total) %>%
+  t() %>%
   as.data.table()
+
+aneuploid_by_lineage <- cbind(aneuploid_by_lineage, aneuploid_by_lineage_ci)
+aneuploid_by_lineage[, estimate := as.numeric(estimate)]
+aneuploid_by_lineage[, conf.low := as.numeric(conf.low)]
+aneuploid_by_lineage[, conf.high := as.numeric(conf.high)]
 
 aneuploid_by_lineage$lineage <- str_wrap(aneuploid_by_lineage$lineage, width = 10)
 
@@ -500,14 +512,12 @@ aneuploid_by_lineage$lineage <- factor(aneuploid_by_lineage$lineage,
                                                   "Intermediate",
                                                   "Epiblast", "Primitive\nEndoderm"))
 
-by_celltype_plot <- ggplot(data = aneuploid_by_lineage, aes(x = lineage, y = proportion_aneuploid, 
-                                        ymin = proportion_aneuploid - stderr_aneuploid,
-                                        ymax = proportion_aneuploid + stderr_aneuploid,
-                                        fill = lineage)) +
+by_celltype_plot <- ggplot(data = aneuploid_by_lineage, 
+                           aes(x = lineage, y = estimate, ymin = conf.low, ymax = conf.high, fill = lineage)) +
   geom_bar(stat = "identity") +
   geom_errorbar(width = 0.25) +
   scale_fill_brewer(palette = "Dark2") +
-  ylab("Prop. aneuploid cells (\u00B1SE)") +
+  ylab("Prop. aneuploid cells (95% CI)") +
   xlab("Cell type") +
   theme_classic() +
   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
@@ -515,7 +525,7 @@ by_celltype_plot <- ggplot(data = aneuploid_by_lineage, aes(x = lineage, y = pro
   ylim(0, 1)
 
 results$lineage <- factor(results$lineage, ordered = FALSE)
-results$lineage <- relevel(results$lineage, ref = "Undefined")
+results$lineage <- relevel(results$lineage, ref = "Trophectoderm")
 
 enrich_model <- glmer(data = results[!duplicated(cell)], 
   formula = sig_cell ~ (1 | embryo) + lineage, 
@@ -545,3 +555,87 @@ enrichment_plot <- ggplot(data = enrich_coef, aes(x = lineage, y = AME,
         legend.position = "none") +
   geom_hline(yintercept = 0, lty = "dashed", color = "gray") +
   scale_color_manual(values = c("#1b9e77", "#d95f02", "#e7298a", "#66a61e", "#e6ab02"))
+  
+
+### dimension reduction visualization
+
+emtab3929 <- readRDS(here("/RawData/emtab3929/EMTAB3929.rds"))
+emtab3929_gene <- experiments(emtab3929)[["gene"]]
+# assays(emtab3929_gene)[["count"]][1:10, 1:10]
+
+expr_matrix <- assays(emtab3929_gene)[["count"]]
+colnames(expr_matrix) <- gsub("_", ".", colnames(expr_matrix))
+expr_matrix <- expr_matrix[, unique(results$cell)]
+
+sample_sheet <- results[!duplicated(cell)] %>%
+  setnames(., "cell", "sampleNames") %>%
+  as.data.frame()
+rownames(sample_sheet) <- sample_sheet$sampleNames
+gene_annotation <- data.table(gene_short_name = rowRanges(emtab3929@ExperimentList[[1]])$symbol,
+                              ensembl_id = rowRanges(emtab3929@ExperimentList[[1]])$gene) %>% 
+  as.data.frame()
+rownames(gene_annotation) <- rownames(expr_matrix)
+
+cds <- new_cell_data_set(expr_matrix,
+                         cell_metadata = sample_sheet, 
+                         gene_metadata = gene_annotation)
+
+rm(emtab3929)
+rm(emtab3929_gene)
+rm(expr_matrix)
+
+## Step 1: Normalize and pre-process the data
+cds <- preprocess_cds(cds, num_dim = 100)
+
+## Step 2: Remove batch effects with cell alignment
+cds <- align_cds(cds, alignment_group = "embryo", residual_model_formula_str = "~ mapped_reads")
+
+## Step 3: Reduce the dimensions using UMAP
+cds <- reduce_dimension(cds, reduction_method = "tSNE", max_components = 3)
+cds <- reduce_dimension(cds, reduction_method = "UMAP", max_components = 3)
+
+## Step 4: Plot the data
+cds$lineage <- factor(cds$lineage, levels = c("Undefined", "ICM", "Trophectoderm", "Intermediate", "Epiblast", "Primitive Endoderm"))
+
+umap_12 <- plot_cells(cds, x = 1, y = 2, color_cells_by = "lineage", cell_size = 1, 
+                      label_groups_by_cluster = FALSE, show_trajectory_graph = FALSE,
+                      label_cell_groups = FALSE) + 
+  theme_classic() + 
+  theme(legend.position = "none") + 
+  scale_color_brewer(palette = "Dark2")
+
+umap_23 <- plot_cells(cds, x = 2, y = 3, color_cells_by = "lineage", cell_size = 1, 
+                      label_groups_by_cluster = FALSE, show_trajectory_graph = FALSE,
+                      label_cell_groups = FALSE) + 
+  theme_classic() +
+  theme(legend.title = element_blank()) +
+  scale_color_brewer(palette = "Dark2")
+
+cds$sig_cell <- factor(cds$sig_cell, levels = c("0", "1"))
+
+cds$is_aneuploid <- as.character(cds$sig_cell)
+cds$is_aneuploid <- revalue(cds$is_aneuploid, c("0" = "Euploid", "1" = "Aneuploid"))
+
+umap_aneuploid_12 <- plot_cells(cds, x = 1, y = 2, color_cells_by = "is_aneuploid", cell_size = 1, 
+                             label_groups_by_cluster = FALSE, show_trajectory_graph = FALSE,
+                             label_cell_groups = FALSE) + 
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_color_manual(values = c("#4e79a7", "#f28e2b"))
+
+umap_aneuploid_23 <- plot_cells(cds, x = 2, y = 3, color_cells_by = "is_aneuploid", cell_size = 1, 
+                                label_groups_by_cluster = FALSE, show_trajectory_graph = FALSE,
+                                label_cell_groups = FALSE) + 
+  theme_classic() +
+  theme(legend.title = element_blank()) +
+  scale_color_manual(values = c("#4e79a7", "#f28e2b"))
+
+grid_left <- plot_grid(umap_12, umap_aneuploid_12, by_celltype_plot, align = "v", axis = "lr", nrow = 3, 
+                       labels = c("A", "C", "E"), rel_heights = c(0.8, 0.8, 1))
+grid_right <- plot_grid(umap_23, umap_aneuploid_23, enrichment_plot, align = "v", axis = "lr", nrow = 3,
+                       labels = c("B", "D", "F"), rel_heights = c(0.8, 0.8, 1))
+plot_grid(grid_left, grid_right, ncol = 2, rel_widths = c(0.6, 1))
+
+plot_cells_3d(cds, color_cells_by = "lineage", cell_size = 50, 
+              color_palette = c('#1b9e77','#d95f02','#7570b3','#e7298a','#66a61e'),
+              show_trajectory_graph = FALSE)
