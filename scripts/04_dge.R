@@ -23,36 +23,40 @@ colnames(emtab3929_count) <- gsub("_", ".", colnames(emtab3929_count))
 # subset cells to those in which aneuploidies were called
 emtab3929_count <- emtab3929_count[, unique(results$cell)]
 
-emtab_sce <- SingleCellExperiment(assays = list(counts = emtab3929_count))
 
-scnorm_groups <- data.table(cell = colnames(assays(emtab_sce)$counts))
-scnorm_groups[, index := .I]
-scnorm_groups <- merge(scnorm_groups, results[!duplicated(cell)], "cell")
-
-# store cell annotations in colData
-colData(emtab_sce)$embryo <- scnorm_groups$embryo
-colData(emtab_sce)$EStage <- scnorm_groups$EStage
-colData(emtab_sce)$lineage <- scnorm_groups$lineage
-colData(emtab_sce)$num_estage <- scnorm_groups$num_estage
-colData(emtab_sce)$is_aneuploid <- scnorm_groups$sig_cell == 1
-
-# store gene information in RowData
-rowData(emtab_sce) <- rowData(emtab3929_gene)
-
-# set spike-ins; function is deprecated by SingleCellExperiment, but SCnorm still requires this
-isSpike(emtab_sce, type = "ERCC") <- grep("ERCC", rownames(assays(emtab_sce)$counts))
-
-pdf("~/scnorm.pdf")
-par(mfrow = c(2, 2))
-# ultimately decided not to use spike-in data
-# see supplementary note S1 https://media.nature.com/original/nature-assets/nmeth/journal/v14/n6/extref/nmeth.4263-S1.pdf
-emtab_sce <- SCnorm(emtab_sce, Conditions = colData(emtab_sce)$lineage,
-                    PrintProgressPlots = TRUE, NCores = 48, useSpikes = FALSE)
-dev.off()
-saveRDS(emtab_sce, file = here("ProcessedData/emtab_sce.rds"))
+if (file.exists(here("ProcessedData/emtab_sce.rds"))) {
+  emtab_sce <- readRDS(here("ProcessedData/emtab_sce.rds"))
+} else {
+  emtab_sce <- SingleCellExperiment(assays = list(counts = emtab3929_count))
+  
+  scnorm_groups <- data.table(cell = colnames(assays(emtab_sce)$counts))
+  scnorm_groups[, index := .I]
+  scnorm_groups <- merge(scnorm_groups, results[!duplicated(cell)], "cell")
+  
+  # store cell annotations in colData
+  colData(emtab_sce)$embryo <- scnorm_groups$embryo
+  colData(emtab_sce)$EStage <- scnorm_groups$EStage
+  colData(emtab_sce)$lineage <- scnorm_groups$lineage
+  colData(emtab_sce)$num_estage <- scnorm_groups$num_estage
+  colData(emtab_sce)$is_aneuploid <- scnorm_groups$sig_cell == 1
+  
+  # store gene information in RowData
+  rowData(emtab_sce) <- rowData(emtab3929_gene)
+  
+  # set spike-ins; function is deprecated by SingleCellExperiment, but SCnorm still requires this
+  isSpike(emtab_sce, type = "ERCC") <- grep("ERCC", rownames(assays(emtab_sce)$counts))
+  
+  par(mfrow = c(2, 2))
+  # ultimately decided not to use spike-in data
+  # see supplementary note S1 https://media.nature.com/original/nature-assets/nmeth/journal/v14/n6/extref/nmeth.4263-S1.pdf
+  emtab_sce <- SCnorm(emtab_sce, Conditions = colData(emtab_sce)$lineage,
+                      PrintProgressPlots = TRUE, NCores = 48, useSpikes = FALSE)
+  saveRDS(emtab_sce, file = here("ProcessedData/emtab_sce.rds"))
+}
 
 # add chromosome location for each gene
-conquer_ref <- readRDS(here("Homo_sapiens.GRCh38.84.cdna.ncrna.ercc92.granges.rds"))$gene_granges %>%
+# get reference file from conquer
+conquer_ref <- readRDS(here("external_metadata/Homo_sapiens.GRCh38.84.cdna.ncrna.ercc92.granges.rds"))$gene_granges %>%
   as.data.table()
 rowData(emtab_sce)$seqnames <- conquer_ref$seqnames
 
@@ -159,40 +163,43 @@ nb_dge <- function(sce_object, results_data, gene_index, slope = "fixed") {
 # only test genes with expression in more than half of cells
 hi_ex_indices <- unname(which(rowSums(assays(emtab_sce)$normcounts > 1) > (nrow(colData(emtab_sce)) / 2)))
 
-# this code captures warnings output by lme4
-dge_results <- do.call(list, pbmclapply(hi_ex_indices, 
-                                        function(x) {
-                                          r <- tryCatch(
-                                            withCallingHandlers(
-                                              {
-                                                error_text <- "No error."
-                                                list(value = nb_dge(emtab_sce, results, x, slope = "random"), error_text = error_text)
+if (file.exists(here("results/dge_dt.txt"))) {
+  dge_dt <- fread(here("results/dge_dt.txt"))
+} else {
+  # this code captures warnings output by lme4
+  dge_results <- do.call(list, pbmclapply(hi_ex_indices, 
+                                          function(x) {
+                                            r <- tryCatch(
+                                              withCallingHandlers(
+                                                {
+                                                  error_text <- "No error."
+                                                  list(value = nb_dge(emtab_sce, results, x, slope = "random"), error_text = error_text)
+                                                }, 
+                                                warning = function(e) {
+                                                  error_text <<- trimws(paste0("WARNING: ", e))
+                                                  invokeRestart("muffleWarning")
+                                                }), 
+                                              error = function(e) {
+                                                return(list(value = NA, error_text = trimws(paste0("ERROR: ", e))))
                                               }, 
-                                              warning = function(e) {
-                                                error_text <<- trimws(paste0("WARNING: ", e))
-                                                invokeRestart("muffleWarning")
-                                              }), 
-                                            error = function(e) {
-                                              return(list(value = NA, error_text = trimws(paste0("ERROR: ", e))))
-                                            }, 
-                                            finally = {
-                                            }
-                                          )
-                                          return(r)
-                                        }, mc.cores = 48))
-
-warning_text <- sapply(dge_results, function(x) x[2])
-no_warning_models <- which(grepl("No error.", warning_text))
-dge_output <- sapply(dge_results, function(x) x[1])
-no_warning_output <- dge_output[no_warning_models]
-
-dge_dt <- rbindlist(no_warning_output[unlist(lapply(no_warning_output, is.data.table))]) %>%
-  setorder(., p.value)
-
-dge_dt[term == "is_aneuploidTRUE" & !grepl("ERCC", gene_id)]
-
-fwrite(dge_dt, file = here("results/dge_dt.txt"), sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
-dge_dt <- fread(here("results/dge_dt.txt"))
+                                              finally = {
+                                              }
+                                            )
+                                            return(r)
+                                          }, mc.cores = 48))
+  
+  warning_text <- sapply(dge_results, function(x) x[2])
+  no_warning_models <- which(grepl("No error.", warning_text))
+  dge_output <- sapply(dge_results, function(x) x[1])
+  no_warning_output <- dge_output[no_warning_models]
+  
+  dge_dt <- rbindlist(no_warning_output[unlist(lapply(no_warning_output, is.data.table))]) %>%
+    setorder(., p.value)
+  
+  dge_dt[term == "is_aneuploidTRUE" & !grepl("ERCC", gene_id)]
+  
+  fwrite(dge_dt, file = here("results/dge_dt.txt"), sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
+}
 
 dge_aneuploidy <- dge_dt[term == "is_aneuploidTRUE"] %>%
   filter(!(grepl("ERCC", gene_id))) %>%
@@ -243,9 +250,9 @@ plotEnrichment <- function(pathway, stats, gseaParam = 1, ticksSize = 0.2, line_
   diff <- (max(tops) - min(bottoms))/8
   x = y = NULL
   g <- ggplot(toPlot, aes(x = x, y = y)) + geom_point(color = line_color, 
-                                                      size = 0.1) + geom_hline(yintercept = max(tops), colour = "red", 
-                                                                               linetype = "dashed") + geom_hline(yintercept = min(bottoms), 
-                                                                                                                 colour = "red", linetype = "dashed") + geom_hline(yintercept = 0, 
+    size = 0.1) + geom_hline(yintercept = max(tops), colour = "red", 
+    linetype = "dashed") + geom_hline(yintercept = min(bottoms), 
+    colour = "red", linetype = "dashed") + geom_hline(yintercept = 0, 
                                                                                                                                                                    colour = "black") + geom_line(color = line_color) + theme_bw() + 
     geom_segment(data = data.frame(x = pathway), mapping = aes(x = x, 
                                                                y = -diff/2, xend = x, yend = diff/2), size = ticksSize) + 
@@ -293,7 +300,6 @@ volcano <- ggplot() +
              aes(x = estimate, y = -log10(p.value)), color = "#7570b3") +
   theme_classic() +
   scale_color_manual(name = "", 
-                     #breaks = c("c1", "c2"), 
                      values = c("gray", "#d95f02", "#7570b3", "#e7298a"),
                      labels = c("", "TNF signaling via  NF-kB", "Myc targets v1", "Oxidative phosphorylation")) +
   ylab(expression(-log[10](italic(p)))) +
@@ -341,8 +347,6 @@ plot_dge <- function(sce_object, results_data, gene_symbol) {
   return(p1)
 }
 
-emtab_sce <- readRDS(file = here("ProcessedData/emtab_sce.rds"))
-
 dge_gdf15 <- plot_dge(emtab_sce, results, "GDF15") + scale_y_log10()
 dge_zfp42 <- plot_dge(emtab_sce, results, "ZFP42")
 
@@ -352,3 +356,8 @@ dge_aneuploidy_to_supplement <- setorder(dge_aneuploidy, p.value) %>%
 
 fwrite(dge_aneuploidy_to_supplement, file = here("results/dge_results.txt"), 
        quote = FALSE, row.names = FALSE, col.names = TRUE, sep = "\t")
+
+###
+
+devtools::session_info()
+
