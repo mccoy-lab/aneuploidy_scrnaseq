@@ -565,7 +565,7 @@ enrichment_plot <- ggplot(data = enrich_coef, aes(x = lineage, y = AME,
 
 ### dimension reduction visualization
 
-emtab3929 <- readRDS(here("/RawData/emtab3929/EMTAB3929.rds"))
+emtab3929 <- readRDS(here("/RawData/EMTAB3929.rds"))
 emtab3929_gene <- experiments(emtab3929)[["gene"]]
 # assays(emtab3929_gene)[["count"]][1:10, 1:10]
 
