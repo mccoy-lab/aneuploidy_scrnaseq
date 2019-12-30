@@ -1,69 +1,36 @@
----
-author: Margaret R. Starostik
-title: "EMTAB3929: Data Preparation"
-output:
-  pdf_document:
-    latex_engine: xelatex
-mainfont: Arial
-monofont: Arial
-fontsize: 10pt
-geometry: margin = 1in
-header-includes:
-  \usepackage[dvipsnames]{xcolor}
----
-
-```{r GenSetup, echo = FALSE, eval = FALSE}
-# Ensure clean R environment
-rm(list=ls())
+list_of_packages <- c("BiocStyle", "biomaRt", "devtools", "dplyr", "gplots", "gridExtra", 
+                      "here", "lme4", "MultiAssayExperiment", "readxl", "Rtsne", "scater", 
+                      "scploid", "scran", "tidyr", "umap")
 
 # Change global default setting so every data frame created will not auto-convert to factors unless explicitly instructed
-options(stringsAsFactors = FALSE) 
-
-# Modify global options for compiling PDF
-knitr::opts_chunk$set(tidy.opts = list(width.cutoff = 120), tidy = TRUE)
+options(stringsAsFactors = FALSE)
 
 # Source my collection of functions
-source("/Users/Margaret/Desktop/JHU/COURSEWORK/2018_Fall/Rotation02_RajivMcCoy/AneuploidyProject/Scripts/UsefulFunctions.R")
+# Easily install and load packages
+install_and_load_packages <- function(pkg){
+  new_packages <- list_of_packages[!(list_of_packages %in% installed.packages()[, "Package"])]
+  if(length(new_packages))
+    install.packages(new_packages, dependencies = TRUE)
+  sapply(list_of_packages, require, character.only = TRUE)
+}
 
-# Load/install packages
-list_of_packages <- c("biomaRt", "BiocStyle", "devtools", "dplyr", "gplots", "gridExtra", "lme4", 
-                      "MultiAssayExperiment", "readxl", "Rtsne", "scater", "scploid", "scran",
-                      "tidyr", "umap")
 install_and_load_packages(list_of_packages)
 
-# Note that the edgeR package masks the scploid getCounts object. Resolve.
-getCounts <- scploid::getCounts
-```
-
-
-Data were acquired for the human embryo (EMTAB3929) scRNA-seq aneuploidy project as follows:  
-(1) EMTAB3929 data (PMID 27062923) were downloaded on 11/6/2018 from http://imlspenticton.uzh.ch:3838/conquer/.  
-\setlength{\leftskip}{1pt}
-Data included:  
-\setlength{\leftskip}{2pt}
-(a) MultiAssay Experiment (EMTAB3929.rds)  
-(b) MultiQC report  
-(c) Scater report  
-(d) Salmon archive (EMTAB3929_salmo.tar and EMTAB3929 folder)  
-\setlength{\leftskip}{0pt}
-
-(2) Supplementary files from Griffiths et al., 2017 were forked on 11/06/2018 from MarioniLab/Aneuploidy2017 on Github:             https://github.com/MarioniLab/Aneuploidy2017.  
-
-(3) Data from Griffiths et al., 2017 were downloaded on 11/14/2018 using the shell script supplied in their supplementary files     (sh get_data.sh)  
-
-```{r ProjectSetup, eval = FALSE}
-# Set up folders
-project_folder <- "/Users/Margaret/Desktop/JHU/COURSEWORK/2018_Fall/Rotation02_RajivMcCoy/AneuploidyProject/"
+# Data were acquired for the human embryo (EMTAB3929) scRNA-seq aneuploidy project as follows:  
+# (1) EMTAB3929 data (PMID 27062923) were downloaded on 11/6/2018 from http://imlspenticton.uzh.ch:3838/conquer/.  
+# (a) MultiAssay Experiment (EMTAB3929.rds)  
+# (b) MultiQC report  
+# (c) Scater report  
+# (d) Salmon archive (EMTAB3929_salmo.tar and EMTAB3929 folder)  
+# (2) Supplementary files from Griffiths et al., 2017 were forked on 11/06/2018 from MarioniLab/Aneuploidy2017 on Github: https://github.com/MarioniLab/Aneuploidy2017.  
+# (3) Data from Griffiths et al., 2017 were downloaded on 11/14/2018 using the shell script supplied in their supplementary files (sh get_data.sh)  
 
 # Load EMTAB3929 data
-emtab3929_meta <- readRDS(paste0(project_folder, "RawData/emtab3929/EMTAB3929.rds"))
-```
+emtab3929_meta <- readRDS(here("RawData/emtab3929/EMTAB3929.rds"))
 
-## \textcolor{MidnightBlue}{Data Preparation}
-```{r DataPrep, eval = FALSE}
 # (1) Remove version numbers from Ensembl gene IDs
 rownames(emtab3929_meta@ExperimentList@listData$gene@assays$data$count) <- sapply(strsplit(rownames(emtab3929_meta@ExperimentList@listData$gene@assays$data$count), "\\."), `[`, 1)
-#dim(emtab3929_meta@ExperimentList@listData$gene@assays$data$count) # 65218  1529
+dim(emtab3929_meta@ExperimentList@listData$gene@assays$data$count) # 65218  1529
 
 # (2) Obtain annotation for reference genome GRCh38.84 (which is GRCh38.p5 Ensembl 84:Mar 2016); keep autosomal genes only
 human_ensembl <- useMart(biomart = "ENSEMBL_MART_ENSEMBL", 
@@ -80,7 +47,7 @@ annotation <- getBM(
 annotation <- annotation [annotation $chromosome_name %in% 1:22, ] # 56400 genes
 
 # (3) Cell lineage information. Compile sample metasheet.
-cell_lineage_data <- read_xlsx(paste0(project_folder, "stirparo2018_tableS4.xlsx"), sheet = 1)
+cell_lineage_data <- read_xlsx(here("stirparo2018_tableS4.xlsx"), sheet = 1)
 cell_lineage_data <- cell_lineage_data[cell_lineage_data$Study == "Petropoulos et al., 2016 (ERP012552)", ] # 1,481 cells
 cell_lineage_data$Cell <- gsub("_", ".", cell_lineage_data$Cell)
 cell_lineage_data$EStage <- sapply(strsplit(cell_lineage_data$Embryo, "_"), "[", 1)
@@ -112,30 +79,29 @@ emtab3929_counts <- emtab3929_counts[, colnames(emtab3929_counts) %in% metasheet
 
 emtab3929_cpm <- edgeR::cpm(emtab3929_counts, normalized.lib.sizes = TRUE, log = FALSE)
 emtab3929_cpm <- emtab3929_cpm[, colnames(emtab3929_cpm) %in% metasheet$Sample]
-#dim(emtab3929_cpm) # 56,400 genes and 1,481 cells
+dim(emtab3929_cpm) # 56,400 genes and 1,481 cells
 emtab3929_log2cpm <- log2(emtab3929_cpm + 1)
 
 # Apply gene filter used in Griffiths analysis.
 gene_filter <- apply(emtab3929_cpm, 1, median) > 50
 filtered_cpm <- emtab3929_cpm[gene_filter, ] 
-#dim(filtered_cpm) # 2,991 genes and 1,481 cells
+dim(filtered_cpm) # 2,991 genes and 1,481 cells
 filtered_log2cpm <- log2(filtered_cpm + 1)
 
 filtered_counts <- emtab3929_counts[rownames(emtab3929_counts) %in% rownames(filtered_cpm), 
                                     colnames(emtab3929_counts) %in% colnames(filtered_cpm)]
-#dim(filtered_counts) # 2,991 genes and 1,481 cells
-```
+dim(filtered_counts) # 2,991 genes and 1,481 cells
 
-```{r save, eval = FALSE}
 # Save objects for easy uploading in the future.
+
+
 save(metasheet, emtab3929_counts, filtered_counts, emtab3929_cpm, filtered_cpm, filtered_log2cpm, annotation, 
-     file = paste0(project_folder, "ProcessedData/EMTAB3929_DataPrep.RData"))
-```
+     file = here("ProcessedData/EMTAB3929_DataPrep.RData"))
 
-To keep all analyses consistent, the following modifications to the original EMTAB3929 data were made:  
-(1) Removed version numbers from EMTAB3929 Ensembl IDs  
-(2) Included GRCh38.p5 Ensembl 84:Mar2016 (same as GRCh38.84) reference gene annotation. Kept only information for autosomal        genes  
-(3) Included cell lineage information from Stirparo et al., 2018 (Table S4)  
-(4) Applied gene filter of median CPM > 50 used in Griffiths analysis  
 
-**The final data used in downstream analyses contain 2,991 genes and 1,481 cells from a total of 88 embryos.**
+# To keep all analyses consistent, the following modifications to the original EMTAB3929 data were made:  
+# (1) Removed version numbers from EMTAB3929 Ensembl IDs  
+# (2) Included GRCh38.p5 Ensembl 84:Mar2016 (same as GRCh38.84) reference gene annotation. Kept only information for autosomal        genes  
+# (3) Included cell lineage information from Stirparo et al., 2018 (Table S4)  
+# (4) Applied gene filter of median CPM > 50 used in Griffiths analysis  
+# **The final data used in downstream analyses contain 2,991 genes and 1,481 cells from a total of 88 embryos.**
