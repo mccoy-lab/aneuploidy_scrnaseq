@@ -1,7 +1,7 @@
 # aneuploidy_project
 
 
-## Author: Margaret R. Starostik
+## Authors: Margaret R. Starostik, Olukayode A. Sosina, Rajiv C. McCoy
 
 
 ## Data Acquisition
