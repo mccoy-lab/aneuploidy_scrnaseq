@@ -1,7 +1,7 @@
-list_of_packages <- c("broom", "cowplot", "data.table", "dplyr", "GenomicRanges", "here",
-                      "ggbeeswarm", "ggplot2", "ggrepel", "lme4", "margins", "MultiAssayExperiment", 
-                      "pbmcapply", "qvalue", "rtracklayer", "SCnorm", "SingleCellExperiment", 
-                      "viridis")
+list_of_packages <- c("broom", "cowplot", "data.table", "dplyr", "fgsea", "GenomicRanges", 
+                      "ggbeeswarm", "ggplot2", "ggrepel", "here", "lme4", "margins", 
+                      "msigdbr", "MultiAssayExperiment", "pbmcapply", "qvalue", "rtracklayer", 
+                      "SCnorm", "SingleCellExperiment", "viridis")
 
 # Easily install and load packages
 install_and_load_packages <- function(pkg){
@@ -15,7 +15,7 @@ install_and_load_packages(list_of_packages)
 
 # http://imlspenticton.uzh.ch/robinson_lab/conquer/data-mae/EMTAB3929.rds
 emtab3929 <- readRDS(here("RawData/emtab3929/EMTAB3929.rds"))
-results <- fread(here("results.txt")) # load results data
+results <- fread(here("results/aneuploidy_results.txt")) # load results data
 
 emtab3929_gene <- experiments(emtab3929)[["gene"]]
 emtab3929_count <- assays(emtab3929_gene)$count
@@ -49,6 +49,7 @@ par(mfrow = c(2, 2))
 emtab_sce <- SCnorm(emtab_sce, Conditions = colData(emtab_sce)$lineage,
                     PrintProgressPlots = TRUE, NCores = 48, useSpikes = FALSE)
 dev.off()
+saveRDS(emtab_sce, file = here("ProcessedData/emtab_sce.rds"))
 
 # add chromosome location for each gene
 conquer_ref <- readRDS(here("Homo_sapiens.GRCh38.84.cdna.ncrna.ercc92.granges.rds"))$gene_granges %>%
@@ -190,9 +191,8 @@ dge_dt <- rbindlist(no_warning_output[unlist(lapply(no_warning_output, is.data.t
 
 dge_dt[term == "is_aneuploidTRUE" & !grepl("ERCC", gene_id)]
 
-fwrite(dge_dt, file = "/work-zfs/rmccoy22/rmccoy22/mCA/nb/dge_dt.txt", sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
-
-dge_dt <- fread("~/Downloads/dge_dt.txt")
+fwrite(dge_dt, file = here("results/dge_dt.txt"), sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
+dge_dt <- fread(here("results/dge_dt.txt"))
 
 dge_aneuploidy <- dge_dt[term == "is_aneuploidTRUE"] %>%
   filter(!(grepl("ERCC", gene_id))) %>%
@@ -201,17 +201,10 @@ dge_aneuploidy <- dge_dt[term == "is_aneuploidTRUE"] %>%
 
 dge_aneuploidy[, q.value := qvalue(dge_aneuploidy$p.value)$qvalues]
 
-
 ## enrichment analysis
-library(msigdbr)
-library(fgsea)
-library(viridis)
 
 # get hallmark gene sets
 m_df <- msigdbr(species = "Homo sapiens", category = "H")
-# m_df <- msigdbr(species = "Homo sapiens", category = "C5", subcategory = "BP")
-# m_df <- msigdbr(species = "Homo sapiens", category = "C2", subcategory = "CP:REACTOME")
-# m_df <- msigdbr(species = "Homo sapiens", category = "C7")
 
 m_list <- m_df %>% 
   split(x = .$gene_symbol, f = .$gs_name)
@@ -220,18 +213,18 @@ m_list <- m_df %>%
 ranks <- dge_aneuploidy$statistic
 names(ranks) <- dge_aneuploidy$gene_symbol
 
-fgsea_results <- fgsea(m_list, stats = ranks, nperm = 1e6, minSize = 10, maxSize = 500, nproc = 1) %>%
+fgsea_results <- fgseaMultilevel(m_list, stats = ranks, minSize = 10, maxSize = 500, nproc = 1) %>%
   setorder(pval, NES)
 
-gsea_all <- ggplot(fgsea_results[padj < 0.1], 
+gsea_all <- ggplot(fgsea_results[padj < 0.05], 
                    aes(x = reorder(gsub("_", " ", gsub("HALLMARK_", "", pathway)), NES), y = NES, fill = -log10(pval))) +
   geom_col() +
   coord_flip() +
   labs(x= "Pathway", y = "Normalized Enrichment Score") + 
   theme_minimal() +
-  scale_fill_viridis(limits = c(0, 6), name = expression(-log[10](italic(p))), end = 0.9)
+  scale_fill_viridis(limits = c(0, 50), name = expression(-log[10](italic(p))), end = 0.9)
 
-plotEnrichment <- function (pathway, stats, gseaParam = 1, ticksSize = 0.2, line_color = "green") {
+plotEnrichment <- function(pathway, stats, gseaParam = 1, ticksSize = 0.2, line_color = "green") {
   rnk <- rank(-stats)
   ord <- order(rnk)
   statsAdj <- stats[ord]
@@ -261,82 +254,60 @@ plotEnrichment <- function (pathway, stats, gseaParam = 1, ticksSize = 0.2, line
   g
 }
 
-gsea_sub1 <- plotEnrichment(m_list[["HALLMARK_KRAS_SIGNALING_DN"]], ranks, line_color = "#d95f02") + 
-  labs(title = "KRAS SIGNALING DN", size = 2) +
+gsea_sub1 <- plotEnrichment(m_list[["HALLMARK_TNFA_SIGNALING_VIA_NFKB"]], ranks, line_color = "#d95f02") + 
+  labs(title = "TNFA SIGNALING VIA NFKB", size = 2) +
   theme(plot.title = element_text(size = 10)) +
   ylab("Enrichment Score") +
   xlab("Gene Rank")
 
-gsea_sub2 <- plotEnrichment(m_list[["HALLMARK_INFLAMMATORY_RESPONSE"]], ranks, line_color = "#1b9e77") + 
-  labs(title = "INFLAMMATORY RESPONSE") +
-  theme(plot.title = element_text(size = 10)) +
-  ylab("Enrichment Score") +
-  xlab("Gene Rank")
-
-gsea_sub3 <- plotEnrichment(m_list[["HALLMARK_MYC_TARGETS_V1"]], ranks, line_color = "#7570b3") + 
-  scale_color_manual(values = "red") +
+gsea_sub2 <- plotEnrichment(m_list[["HALLMARK_MYC_TARGETS_V1"]], ranks, line_color = "#1b9e77") + 
   labs(title = "MYC TARGETS V1") +
   theme(plot.title = element_text(size = 10)) +
   ylab("Enrichment Score") +
   xlab("Gene Rank")
 
-gsea_sub4 <- plotEnrichment(m_list[["HALLMARK_OXIDATIVE_PHOSPHORYLATION"]], ranks, line_color = "#e7298a") + 
+gsea_sub3 <- plotEnrichment(m_list[["HALLMARK_OXIDATIVE_PHOSPHORYLATION"]], ranks, line_color = "#7570b3") + 
   scale_color_manual(values = "red") +
   labs(title = "OXIDATIVE PHOSPHORYLATION") +
   theme(plot.title = element_text(size = 10)) +
   ylab("Enrichment Score") +
   xlab("Gene Rank")
 
-le_kras <- unlist(fgsea_results[pathway == "HALLMARK_KRAS_SIGNALING_DN"]$leadingEdge)
-le_infl <- unlist(fgsea_results[pathway == "HALLMARK_INFLAMMATORY_RESPONSE"]$leadingEdge)
-le_kras_infl <- le_infl[le_infl %in% le_kras]
-le_myc1 <- unlist(fgsea_results[pathway == "HALLMARK_MYC_TARGETS_V1"]$leadingEdge)
-le_oxph <- unlist(fgsea_results[pathway == "HALLMARK_OXIDATIVE_PHOSPHORYLATION"]$leadingEdge)
-le_oxph_myc1 <- le_oxph[le_oxph %in% le_myc1]
+le_s1 <- unlist(fgsea_results[pathway == "HALLMARK_TNFA_SIGNALING_VIA_NFKB"]$leadingEdge)
+le_s2 <- unlist(fgsea_results[pathway == "HALLMARK_MYC_TARGETS_V1"]$leadingEdge)
+le_s3 <- unlist(fgsea_results[pathway == "HALLMARK_OXIDATIVE_PHOSPHORYLATION"]$leadingEdge)
 
 dge_aneuploidy[, pathway_label := as.character(NA)]
-dge_aneuploidy[gene_symbol %in% le_kras, pathway_label := "HALLMARK_KRAS_SIGNALING_DN"]
-dge_aneuploidy[gene_symbol %in% le_infl, pathway_label := "HALLMARK_INFLAMMATORY_RESPONSE"]
-dge_aneuploidy[gene_symbol %in% le_myc1, pathway_label := "HALLMARK_MYC_TARGETS_V1"]
-dge_aneuploidy[gene_symbol %in% le_oxph, pathway_label := "HALLMARK_OXIDATIVE_PHOSPHORYLATION"]
-dge_aneuploidy[gene_symbol %in% le_kras_infl, pathway_label := "KRAS_DN/INFLAMM"]
-dge_aneuploidy[gene_symbol %in% le_oxph_myc1, pathway_label := "MYC_TARGETS/OXPHOS"]
+dge_aneuploidy[gene_symbol %in% le_s1, pathway_label := "HALLMARK_TNFA_SIGNALING_VIA_NFKB"]
+dge_aneuploidy[gene_symbol %in% le_s2, pathway_label := "HALLMARK_MYC_TARGETS_V1"]
+dge_aneuploidy[gene_symbol %in% le_s3, pathway_label := "HALLMARK_OXIDATIVE_PHOSPHORYLATION"]
 
 volcano <- ggplot() +
   geom_point(data = dge_aneuploidy[is.na(pathway_label)], 
              aes(x = estimate, y = -log10(p.value)), color = "gray") +
-  geom_point(data = dge_aneuploidy[pathway_label == "HALLMARK_KRAS_SIGNALING_DN"], 
+  geom_point(data = dge_aneuploidy[pathway_label == "HALLMARK_TNFA_SIGNALING_VIA_NFKB"], 
              aes(x = estimate, y = -log10(p.value)), color = "#d95f02") +
-  geom_point(data = dge_aneuploidy[pathway_label == "HALLMARK_INFLAMMATORY_RESPONSE"], 
-             aes(x = estimate, y = -log10(p.value)), color = "#1b9e77") +
   geom_point(data = dge_aneuploidy[pathway_label == "HALLMARK_MYC_TARGETS_V1"], 
-             aes(x = estimate, y = -log10(p.value)), color = "#7570b3") +
+             aes(x = estimate, y = -log10(p.value)), color = "#1b9e77") +
   geom_point(data = dge_aneuploidy[pathway_label == "HALLMARK_OXIDATIVE_PHOSPHORYLATION"], 
-             aes(x = estimate, y = -log10(p.value)), color = "#e7298a") +
-  geom_point(data = dge_aneuploidy[pathway_label == "KRAS_DN/INFLAMM"], pch = 21,
-             aes(x = estimate, y = -log10(p.value)), color = "#1b9e77", fill = "#d95f02") +
-  geom_point(data = dge_aneuploidy[pathway_label == "MYC_TARGETS/OXPHOS"], pch = 21,
-             aes(x = estimate, y = -log10(p.value)), color = "#7570b3", fill = "#e7298a") +
+             aes(x = estimate, y = -log10(p.value)), color = "#7570b3") +
   theme_classic() +
   scale_color_manual(name = "", 
                      #breaks = c("c1", "c2"), 
-                     values = c("gray", "#d95f02", "#7570b3", "#e7298a", "#1b9e77", "#7570b3"),
-                     labels = c("", "KRAS SIGNALING DN", "INFLAMMATORY RESPONSE", "MYC TARGETS V1", "OXIDATIVE PHOSPHORYLATION", "", "")) +
-  #scale_color_manual(name = "", 
-  #                   breaks = c("KRAS SIGNALING DN", "INFLAMMATORY RESPONSE", "MYC TARGETS V1", "OXIDATIVE PHOSPHORYLATION", "KRAS_DN/INFLAMM", "MYC_TARGETS/OXPHOS")) +
+                     values = c("gray", "#d95f02", "#7570b3", "#e7298a"),
+                     labels = c("", "TNF signaling via  NF-kB", "Myc targets v1", "Oxidative phosphorylation")) +
   ylab(expression(-log[10](italic(p)))) +
   xlab(expression(hat(italic("\u03B2")))) +
-  ylim(0, 20) +
+  ylim(0, 18) +
   xlim(-1.1, 1.5) +
   theme(legend.position = c(0.27, 0.93),
         legend.background = element_blank()) +
-  geom_text_repel(data = dge_aneuploidy[p.value < 1e-11], 
+  geom_text_repel(data = dge_aneuploidy[p.value < 1e-8], 
                   aes(label = gene_symbol, x = estimate, y = -log10(p.value)), size = 3, fontface = "italic")
 
-plot_grid(plot_grid(gsea_all, volcano, labels = c("A", "B"), ncol = 1),
-          plot_grid(gsea_sub1, gsea_sub2, gsea_sub3, gsea_sub4, ncol = 1, labels = c("C", "D", "E", "F")), 
+plot_grid(plot_grid(gsea_all, volcano, labels = c("A", "B"), ncol = 1, rel_heights = c(0.7, 1)),
+          plot_grid(gsea_sub1, gsea_sub2, gsea_sub3, ncol = 1, labels = c("C", "D", "E")), 
           ncol = 2, rel_widths = c(1, 0.5))
-
 
 plot_dge <- function(sce_object, results_data, gene_symbol) {
   
@@ -352,10 +323,14 @@ plot_dge <- function(sce_object, results_data, gene_symbol) {
   
   summary(glmer.nb(data = cds_gene, formula = round(counts + 1) ~ (1 | embryo) + (1 | lineage) + num_estage + is_aneuploid, nAGQ = 0))
   
+  cds_gene$lineage <- factor(cds_gene$lineage, 
+                             levels = c("Undefined", "ICM", "Trophectoderm", "Intermediate", "Epiblast", "Primitive Endoderm"))
+  
   p1 <- ggplot(data = cds_gene[counts != 0], aes(x = EStage, y = (counts + 1), color = is_aneuploid)) +
     theme_classic() +
-    geom_beeswarm(dodge.width = 0.7, size = 0.4) +
-    scale_y_log10() +
+    geom_beeswarm(dodge.width = 1, size = 0.2) +
+    #geom_violin() +
+    #scale_y_log10() +
     facet_wrap(~ lineage, nrow = 3) +
     scale_color_manual(values = c("#4e79a7", "#f28e2b"), labels = c("Euploid", "Aneuploid"), name = "") +
     ylab("Normalized counts (zeros excluded)") +
@@ -363,24 +338,17 @@ plot_dge <- function(sce_object, results_data, gene_symbol) {
     theme(plot.title = element_text(face = "italic")) +
     ggtitle(gene_symbol)
   
-  # p1 <- ggplot(data = cds_gene, aes(x = EStage, y = (counts + 1), fill = is_aneuploid)) +
-  #   theme_classic() +
-  #   geom_boxplot() +
-  #   scale_y_log10() +
-  #   facet_grid(lineage ~ .) +
-  #   scale_fill_manual(values = c("#4e79a7", "#f28e2b"))
-  
   return(p1)
 }
 
-pdf("~/GDF15.pdf", height = 5, width = 8)
-plot_dge(emtab_sce, results, "GDF15")
-dev.off()
+emtab_sce <- readRDS(file = here("ProcessedData/emtab_sce.rds"))
 
-pdf("~/LDHA.pdf", height = 5, width = 8)
-plot_dge(emtab_sce, results, "LDHA")
-dev.off()
+dge_gdf15 <- plot_dge(emtab_sce, results, "GDF15") + scale_y_log10()
+dge_zfp42 <- plot_dge(emtab_sce, results, "ZFP42")
 
 dge_aneuploidy_to_supplement <- setorder(dge_aneuploidy, p.value) %>%
   select(c("gene_id", "gene_symbol", "estimate", "std.error", "p.value", "q.value", "AME", "AME_SE", "AME_P")) %>%
   setnames(c("ensembl_id", "symbol", "beta", "beta_se", "beta_p", "beta_q", "ame", "ame_se", "ame_p"))
+
+fwrite(dge_aneuploidy_to_supplement, file = here("results/dge_results.txt"), 
+       quote = FALSE, row.names = FALSE, col.names = TRUE, sep = "\t")
