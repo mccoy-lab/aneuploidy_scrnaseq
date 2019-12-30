@@ -47,7 +47,7 @@ annotation <- getBM(
 annotation <- annotation [annotation $chromosome_name %in% 1:22, ] # 56400 genes
 
 # (3) Cell lineage information. Compile sample metasheet.
-cell_lineage_data <- read_xlsx(here("stirparo2018_tableS4.xlsx"), sheet = 1)
+cell_lineage_data <- read_xlsx(here("external_metadata/stirparo2018_tableS4.xlsx"), sheet = 1)
 cell_lineage_data <- cell_lineage_data[cell_lineage_data$Study == "Petropoulos et al., 2016 (ERP012552)", ] # 1,481 cells
 cell_lineage_data$Cell <- gsub("_", ".", cell_lineage_data$Cell)
 cell_lineage_data$EStage <- sapply(strsplit(cell_lineage_data$Embryo, "_"), "[", 1)
@@ -94,10 +94,8 @@ dim(filtered_counts) # 2,991 genes and 1,481 cells
 
 # Save objects for easy uploading in the future.
 
-
 save(metasheet, emtab3929_counts, filtered_counts, emtab3929_cpm, filtered_cpm, filtered_log2cpm, annotation, 
      file = here("ProcessedData/EMTAB3929_DataPrep.RData"))
-
 
 # To keep all analyses consistent, the following modifications to the original EMTAB3929 data were made:  
 # (1) Removed version numbers from EMTAB3929 Ensembl IDs  
