@@ -26,7 +26,7 @@ install_and_load_packages(list_of_packages)
 # (3) Data from Griffiths et al., 2017 were downloaded on 11/14/2018 using the shell script supplied in their supplementary files (sh get_data.sh)  
 
 # Load EMTAB3929 data
-emtab3929_meta <- readRDS(here("RawData/emtab3929/EMTAB3929.rds"))
+emtab3929_meta <- readRDS(here("RawData/EMTAB3929.rds"))
 
 # (1) Remove version numbers from Ensembl gene IDs
 rownames(emtab3929_meta@ExperimentList@listData$gene@assays$data$count) <- sapply(strsplit(rownames(emtab3929_meta@ExperimentList@listData$gene@assays$data$count), "\\."), `[`, 1)
