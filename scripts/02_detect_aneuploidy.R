@@ -117,8 +117,8 @@ setnames(expression_results, "score", "scploid_score")
 setnames(expression_results, "p", "scploid_p")
 
 ## add ASE data
-file_list <- list.files(here("ase_tables"), pattern = "*.table", full.names = TRUE)
-mappings <- fread(here("ase_tables/E-MTAB-3929.sdrf.txt"))[, c(1, 31)] %>%
+file_list <- list.files(here("results/ase_tables"), pattern = "*.table", full.names = TRUE)
+mappings <- fread(here("results/ase_tables/E-MTAB-3929.sdrf.txt"))[, c(1, 31)] %>%
   setnames(., c("cell", "accession"))
 
 read_ase <- function(file_name, metadata) {
