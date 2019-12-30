@@ -1,8 +1,6 @@
-# aneuploidy_project
-
+# Code associated with "Single-cell analysis of human embryos reveals widespread and complex patterns of chromosomal mosaicism".
 
 ## Authors: Margaret R. Starostik, Olukayode A. Sosina, Rajiv C. McCoy
-
 
 ## Data Acquisition
 
