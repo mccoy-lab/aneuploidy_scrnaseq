@@ -642,6 +642,10 @@ grid_right <- plot_grid(umap_23, umap_aneuploid_23, enrichment_plot, align = "v"
                         labels = c("B", "D", "F"), rel_heights = c(0.8, 0.8, 1))
 plot_grid(grid_left, grid_right, ncol = 2, rel_widths = c(0.6, 1))
 
-plot_cells_3d(cds, color_cells_by = "lineage", cell_size = 50, 
-              color_palette = c('#1b9e77','#d95f02','#7570b3','#e7298a','#66a61e'),
-              show_trajectory_graph = FALSE)
+###
+
+devtools::session_info()
+
+
+
+
