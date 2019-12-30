@@ -1,4 +1,0 @@
-result
-residuals	Exercise Caution
-ngenes	Poor quality
-zeros	Good quality
