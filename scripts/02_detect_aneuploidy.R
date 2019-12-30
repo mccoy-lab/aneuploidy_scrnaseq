@@ -642,6 +642,8 @@ grid_right <- plot_grid(umap_23, umap_aneuploid_23, enrichment_plot, align = "v"
                         labels = c("B", "D", "F"), rel_heights = c(0.8, 0.8, 1))
 plot_grid(grid_left, grid_right, ncol = 2, rel_widths = c(0.6, 1))
 
+fwrite(results, here("results/aneuploidy_results.txt"), sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)
+
 ###
 
 devtools::session_info()
