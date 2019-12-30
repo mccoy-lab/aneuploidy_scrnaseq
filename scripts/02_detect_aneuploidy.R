@@ -117,33 +117,38 @@ setnames(expression_results, "score", "scploid_score")
 setnames(expression_results, "p", "scploid_p")
 
 ## add ASE data
-file_list <- list.files(here("results/ase_tables"), pattern = "*.table", full.names = TRUE)
-mappings <- fread(here("results/ase_tables/E-MTAB-3929.sdrf.txt"))[, c(1, 31)] %>%
-  setnames(., c("cell", "accession"))
 
-read_ase <- function(file_name, metadata) {
-  id <- sub('\\..*$', '', basename(file_name))
-  dt <- fread(file_name)
-  dt[, cell := mappings[accession == id]$cell]
-  dt[, accession := id]
-  return(dt)
+if (file.exists(here("results/ase_by_chr.txt"))) {
+  ase_by_chr <- fread(here("results/ase_by_chr.txt"))
+} else {
+  file_list <- list.files(here("results/ase_tables"), pattern = "*.table", full.names = TRUE)
+  mappings <- fread(here("results/ase_tables/E-MTAB-3929.sdrf.txt"))[, c(1, 31)] %>%
+    setnames(., c("cell", "accession"))
+  read_ase <- function(file_name, metadata) {
+    id <- sub('\\..*$', '', basename(file_name))
+    dt <- fread(file_name)
+    dt[, cell := mappings[accession == id]$cell]
+    dt[, accession := id]
+    return(dt)
+  }
+  ase <- do.call(rbind, lapply(file_list, function(x) read_ase(x, mappings)))
+  ase[, snp_id := paste(contig, position, sep = "_")]
+  ase[, embryo := sub("^(.*)[.].*", '\\1', cell)]
+  ase[, embryo := gsub("_", ".", embryo)]
+  ase[, cell := gsub("_", ".", cell)]
+  ase[, embryo_snp_id := paste(embryo, snp_id, sep = "_")]
+  ase[, minCount := pmin(refCount, altCount)]
+  ase[, maxCount := pmax(refCount, altCount)]
+  
+  # summarize ASE per cell-chromosome
+  ase_by_chr <- group_by(ase, cell, contig) %>%
+    summarize(., allelic_ratio = sum(minCount) / sum(totalCount), 
+              min_count_sum = sum(minCount), 
+              total_reads = sum(totalCount)) %>%
+    as.data.table()
+  fwrite(ase_by_chr, file = here("results/ase_by_chr.txt"), 
+         sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)
 }
-
-ase <- do.call(rbind, lapply(file_list, function(x) read_ase(x, mappings)))
-ase[, snp_id := paste(contig, position, sep = "_")]
-ase[, embryo := sub("^(.*)[.].*", '\\1', cell)]
-ase[, embryo := gsub("_", ".", embryo)]
-ase[, cell := gsub("_", ".", cell)]
-ase[, embryo_snp_id := paste(embryo, snp_id, sep = "_")]
-ase[, minCount := pmin(refCount, altCount)]
-ase[, maxCount := pmax(refCount, altCount)]
-
-# summarize ASE per cell-chromosome
-ase_by_chr <- group_by(ase, cell, contig) %>%
-  summarize(., allelic_ratio = sum(minCount) / sum(totalCount), 
-            min_count_sum = sum(minCount), 
-            total_reads = sum(totalCount)) %>%
-  as.data.table()
 
 # merge with expression data
 ase_by_chr[, chrom := paste(cell, contig, sep = ".")]
