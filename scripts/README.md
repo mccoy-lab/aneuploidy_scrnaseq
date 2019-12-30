@@ -13,12 +13,12 @@
 
 ## References
 
-Griffiths JA, Scialdone A, Marioni JC. 2017. Mosaic autosomal aneuploidies are detectable from single-cell RNAseq data. BMC Genomics 18: 904.
+Griffiths JA, Scialdone A, Marioni JC. 2017. Mosaic autosomal aneuploidies are detectable from single-cell RNAseq data. *BMC Genomics* 18: 904.
 
-Petropoulos S, Edsgärd D, Reinius B, Deng Q, Panula SP, Codeluppi S, Plaza Reyes A, Linnarsson S, Sandberg R, Lanner F. 2016. Single-Cell RNA-Seq Reveals Lineage and X Chromosome Dynamics in Human Preimplantation Embryos. Cell 165: 1012–1026.
+Petropoulos S, Edsgärd D, Reinius B, Deng Q, Panula SP, Codeluppi S, Plaza Reyes A, Linnarsson S, Sandberg R, Lanner F. 2016. Single-Cell RNA-Seq Reveals Lineage and X Chromosome Dynamics in Human Preimplantation Embryos. *Cell* 165: 1012–1026.
 
-Stirparo GG, Boroviak T, Guo G, Nichols J, Smith A, Bertone P. 2018. Integrated analysis of single-cell embryo data yields a unified transcriptome signature for the human pre-implantation epiblast. Development 145. https://dev.biologists.org/content/145/3/dev158501 (Accessed November 20, 2019).
+Stirparo GG, Boroviak T, Guo G, Nichols J, Smith A, Bertone P. 2018. Integrated analysis of single-cell embryo data yields a unified transcriptome signature for the human pre-implantation epiblast. *Development* 145: dev158501.
 
-Zhou F, Wang R, Yuan P, Ren Y, Mao Y, Li R, Lian Y, Li J, Wen L, Yan L, et al. 2019. Reconstituting the transcriptome and DNA methylome landscapes of human implantation. Nature 572: 660–664.
+Zhou F, Wang R, Yuan P, Ren Y, Mao Y, Li R, Lian Y, Li J, Wen L, Yan L, et al. 2019. Reconstituting the transcriptome and DNA methylome landscapes of human implantation. *Nature* 572: 660–664.
 
-Zhu P, Guo H, Ren Y, Hou Y, Dong J, Li R, Lian Y, Fan X, Hu B, Gao Y, et al. 2018. Single-cell DNA methylome sequencing of human preimplantation embryos. Nat Genet 50: 12–19.
+Zhu P, Guo H, Ren Y, Hou Y, Dong J, Li R, Lian Y, Fan X, Hu B, Gao Y, et al. 2018. Single-cell DNA methylome sequencing of human preimplantation embryos. *Nat Genet* 50: 12–19.
