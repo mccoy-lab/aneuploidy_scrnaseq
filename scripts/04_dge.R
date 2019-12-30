@@ -14,7 +14,7 @@ install_and_load_packages <- function(pkg){
 install_and_load_packages(list_of_packages)
 
 # http://imlspenticton.uzh.ch/robinson_lab/conquer/data-mae/EMTAB3929.rds
-emtab3929 <- readRDS(here("RawData/emtab3929/EMTAB3929.rds"))
+emtab3929 <- readRDS(here("RawData/EMTAB3929.rds"))
 results <- fread(here("results/aneuploidy_results.txt")) # load results data
 
 emtab3929_gene <- experiments(emtab3929)[["gene"]]
