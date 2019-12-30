@@ -4,4 +4,4 @@
 
 Analysis code to reproduce all results and figures is available within the `scripts` directory. Scripts should be run in numerical order (00, 01, 02, ...etc.). 
 
-Scripts to perform genotyping and allele-specific expression analysis are provided within the `scripts/genotyping` directory. We also provide the summarized output of this analysis (chromosome-wide measurements of allelic imbalance) in the `results` directory. 
+Code to perform genotyping and allele-specific expression analysis are provided within the `scripts/genotyping` directory. We also provide the summarized output of this analysis (chromosome-wide measurements of allelic imbalance) in the `results` directory. 
