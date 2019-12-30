@@ -1,25 +1,21 @@
-## differential expression
+list_of_packages <- c("broom", "cowplot", "data.table", "dplyr", "GenomicRanges", "here",
+                      "ggbeeswarm", "ggplot2", "ggrepel", "lme4", "margins", "MultiAssayExperiment", 
+                      "pbmcapply", "qvalue", "rtracklayer", "SCnorm", "SingleCellExperiment", 
+                      "viridis")
 
-library(lme4)
-library(data.table)
-library(dplyr)
-library(ggplot2)
-library(ggrepel)
-library(ggbeeswarm)
-library(cowplot)
-library(viridis)
-library(pbmcapply)
-library(qvalue)
-library(broom)
-library(MultiAssayExperiment)
-library(SingleCellExperiment)
-library(rtracklayer)
-library(GenomicRanges)
-library(SCnorm)
-library(margins)
+# Easily install and load packages
+install_and_load_packages <- function(pkg){
+  new_packages <- list_of_packages[!(list_of_packages %in% installed.packages()[, "Package"])]
+  if(length(new_packages))
+    install.packages(new_packages, dependencies = TRUE)
+  sapply(list_of_packages, require, character.only = TRUE)
+}
 
-emtab3929 <- readRDS("/work-zfs/rmccoy22/rmccoy22/mCA/conquer/EMTAB3929.rds")
-load("/work-zfs/rmccoy22/rmccoy22/mCA/nb/results.RData") # load results data
+install_and_load_packages(list_of_packages)
+
+# http://imlspenticton.uzh.ch/robinson_lab/conquer/data-mae/EMTAB3929.rds
+emtab3929 <- readRDS(here("RawData/emtab3929/EMTAB3929.rds"))
+results <- fread(here("results.txt")) # load results data
 
 emtab3929_gene <- experiments(emtab3929)[["gene"]]
 emtab3929_count <- assays(emtab3929_gene)$count
@@ -51,11 +47,11 @@ par(mfrow = c(2, 2))
 # ultimately decided not to use spike-in data
 # see supplementary note S1 https://media.nature.com/original/nature-assets/nmeth/journal/v14/n6/extref/nmeth.4263-S1.pdf
 emtab_sce <- SCnorm(emtab_sce, Conditions = colData(emtab_sce)$lineage,
-                   PrintProgressPlots = TRUE, NCores = 48, useSpikes = FALSE)
+                    PrintProgressPlots = TRUE, NCores = 48, useSpikes = FALSE)
 dev.off()
 
 # add chromosome location for each gene
-conquer_ref <- readRDS("Homo_sapiens.GRCh38.84.cdna.ncrna.ercc92.granges.rds")$gene_granges %>%
+conquer_ref <- readRDS(here("Homo_sapiens.GRCh38.84.cdna.ncrna.ercc92.granges.rds"))$gene_granges %>%
   as.data.table()
 rowData(emtab_sce)$seqnames <- conquer_ref$seqnames
 
@@ -73,8 +69,8 @@ nb_dge <- function(sce_object, results_data, gene_index, slope = "fixed") {
   gene_chr <- paste0("chr", as.character(rowData(sce_object)$seqnames[gene_index]))
   
   cds_gene <- suppressWarnings(merge(cds_gene, 
-                    colData(sce_object) %>% as.data.table(., keep.rownames = "cell"),
-                    "cell"))
+                                     colData(sce_object) %>% as.data.table(., keep.rownames = "cell"),
+                                     "cell"))
   
   # drop cells with aneuploidies affecting the same chromosome as the location of the gene
   # being tested for differential expression
@@ -108,7 +104,7 @@ nb_dge <- function(sce_object, results_data, gene_index, slope = "fixed") {
     m2_m1_anova <- suppressWarnings(tidy(m2_m1_anova))
     
     if (m2_m1_anova[2,]$p.value < 0.05) {
-    
+      
       results_summary <- suppressWarnings(tidy(m2)) %>%
         mutate(gene_id = gene_id) %>%
         mutate(gene_symbol = gene_symbol) %>%
@@ -129,7 +125,7 @@ nb_dge <- function(sce_object, results_data, gene_index, slope = "fixed") {
       results_summary[term == "is_aneuploidTRUE", AME := results_margins[factor == "is_aneuploid"]$AME]
       results_summary[term == "is_aneuploidTRUE", AME_SE := results_margins[factor == "is_aneuploid"]$SE]
       results_summary[term == "is_aneuploidTRUE", AME_P := results_margins[factor == "is_aneuploid"]$p]
-    
+      
     } else if (m2_m1_anova[2,]$p.value >= 0.05) {
       
       results_summary <- suppressWarnings(tidy(m1)) %>%
@@ -254,10 +250,10 @@ plotEnrichment <- function (pathway, stats, gseaParam = 1, ticksSize = 0.2, line
   diff <- (max(tops) - min(bottoms))/8
   x = y = NULL
   g <- ggplot(toPlot, aes(x = x, y = y)) + geom_point(color = line_color, 
-    size = 0.1) + geom_hline(yintercept = max(tops), colour = "red", 
-    linetype = "dashed") + geom_hline(yintercept = min(bottoms), 
-    colour = "red", linetype = "dashed") + geom_hline(yintercept = 0, 
-    colour = "black") + geom_line(color = line_color) + theme_bw() + 
+                                                      size = 0.1) + geom_hline(yintercept = max(tops), colour = "red", 
+                                                                               linetype = "dashed") + geom_hline(yintercept = min(bottoms), 
+                                                                                                                 colour = "red", linetype = "dashed") + geom_hline(yintercept = 0, 
+                                                                                                                                                                   colour = "black") + geom_line(color = line_color) + theme_bw() + 
     geom_segment(data = data.frame(x = pathway), mapping = aes(x = x, 
                                                                y = -diff/2, xend = x, yend = diff/2), size = ticksSize) + 
     theme(panel.border = element_blank(), panel.grid.minor = element_blank()) + 
@@ -388,5 +384,3 @@ dev.off()
 dge_aneuploidy_to_supplement <- setorder(dge_aneuploidy, p.value) %>%
   select(c("gene_id", "gene_symbol", "estimate", "std.error", "p.value", "q.value", "AME", "AME_SE", "AME_P")) %>%
   setnames(c("ensembl_id", "symbol", "beta", "beta_se", "beta_p", "beta_q", "ame", "ame_se", "ame_p"))
-
-
