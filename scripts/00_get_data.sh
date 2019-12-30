@@ -9,3 +9,5 @@ mkdir -p ../external_metadata
 if [ ! -f ../external_metadata/stirparo2018_tableS4.xlsx ]; then
     wget -O ../external_metadata/stirparo2018_tableS4.xlsx http://www.biologists.com/DEV_Movies/DEV158501/TableS4.xlsx
 fi
+
+mkdir -p ../ProcessedData
