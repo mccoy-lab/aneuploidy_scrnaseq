@@ -203,6 +203,7 @@ ggplot(data = enrichment_results, aes(x = threshold, y = estimate, ymin = conf.l
   geom_line() +
   geom_ribbon(alpha = 0.2) +
   scale_x_log10() +
+  theme_classic() +
   geom_hline(yintercept = 1, lty = "dotted") +
   xlab("P-value threshold") +
   ylab("Odds Ratio")
@@ -461,7 +462,7 @@ plot_mca_sig <- function(embryo_id) {
 }
 
 for (embryo_id in unique(results$embryo)) {
-  pdf(file = paste0("~/Downloads/mosaic_aneuploidy_plots/", embryo_id, ".pdf"), height = 4, width = 6)
+  pdf(file = paste0(here("/results/mosaic_aneuploidy_plots/"), embryo_id, ".pdf"), height = 4, width = 6)
   try(print(plot_mca(embryo_id, combine = TRUE, cluster_method = "ward.D2", dist_method = "euclidean")))
   dev.off()
 }
@@ -471,12 +472,6 @@ plot_b <- plot_mca("E5.13", combine = TRUE, cluster_method = "average", dist_met
 plot_c <- plot_mca("E7.17", combine = TRUE, cluster_method = "average", dist_method = "euclidean")
 plot_d <- plot_mca("E7.5", combine = TRUE, cluster_method = "average", dist_method = "euclidean")
 plot_grid(plot_a, plot_b, plot_c, plot_d, ncol = 2, nrow = 2, labels = c('A', 'B', 'C', 'D'))
-
-for (embryo_id in unique(results$embryo)) {
-  pdf(file = paste0("~/Downloads/mosaic_aneuploidy_plots/", embryo_id, ".pdf"), height = 4, width = 6)
-  try(print(plot_mca_sig(embryo_id)))
-  dev.off()
-}
 
 ### statistical models of cell-type-specificity
 

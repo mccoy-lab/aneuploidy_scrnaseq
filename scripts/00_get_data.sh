@@ -11,3 +11,4 @@ if [ ! -f ../external_metadata/stirparo2018_tableS4.xlsx ]; then
 fi
 
 mkdir -p ../ProcessedData
+mkdir -p ../results/mosaic_aneuploidy_plots
