@@ -1,8 +1,8 @@
-# Code associated with "Single-cell analysis of human embryos reveals widespread and complex patterns of chromosomal mosaicism".
+## Code associated with "Single-cell analysis of human embryos reveals widespread and complex patterns of chromosomal mosaicism".
 
-## Authors: Margaret R. Starostik, Olukayode A. Sosina, Rajiv C. McCoy
+### Authors: Margaret R. Starostik, Olukayode A. Sosina, Rajiv C. McCoy
 
-## Data Acquisition
+### Data Acquisition
 
 The data set EMTAB3929 (PMID 27062923) was downloaded on Tuesday November 6 13:29 EST 2018 using:
 
@@ -15,7 +15,7 @@ Supplementary files from Griffiths et al., 2017 were forked on Tuesday, November
 Data used in Griffiths et al., 2017 were obtained using their shell script: sh get_data.sh on Wednesday November 14, 12:33 EST 2018.
 
 
-## scploid R Package
+### scploid R Package
 
 The package was installed from R using the devtools package and the following commands:
 
