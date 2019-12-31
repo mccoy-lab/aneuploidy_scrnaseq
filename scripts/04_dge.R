@@ -197,7 +197,7 @@ if (file.exists(here("results/dge_dt.txt"))) {
                                               }
                                             )
                                             return(r)
-                                          }, mc.cores = 48))
+                                          }, mc.cores = 48, ignore.interactive = getOption("ignore.interactive", T)))
   
   warning_text <- sapply(dge_results, function(x) x[2])
   no_warning_models <- which(grepl("No error.", warning_text))
