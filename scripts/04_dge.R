@@ -372,3 +372,125 @@ fwrite(dge_aneuploidy_to_supplement, file = here("results/dge_results.txt"),
 
 devtools::session_info()
 
+# ─ Session info ───────────────────────────────────────────────────────────────
+# setting  value
+# version  R version 3.6.1 (2019-07-05)   
+# os       CentOS Linux 7 (Core)
+# system   x86_64, linux-gnu
+# ui       X11
+# language (EN)
+# collate  en_US.UTF-8
+# ctype    en_US.UTF-8
+# tz       America/New_York
+# date     2019-12-30
+# 
+# ─ Packages ───────────────────────────────────────────────────────────────────
+# package              * version   date       lib source
+# assertthat             0.2.1     2019-03-21 [2] CRAN (R 3.6.1)
+# backports              1.1.5     2019-10-02 [1] CRAN (R 3.6.1)
+# beeswarm               0.2.3     2016-04-25 [1] CRAN (R 3.6.1)
+# Biobase              * 2.46.0    2019-10-29 [1] Bioconductor
+# BiocGenerics         * 0.32.0    2019-10-29 [1] Bioconductor
+# BiocParallel         * 1.20.0    2019-10-30 [1] Bioconductor
+# Biostrings             2.54.0    2019-10-29 [1] Bioconductor
+# bitops                 1.0-6     2013-08-17 [1] CRAN (R 3.6.1)
+# boot                   1.3-22    2019-04-02 [2] CRAN (R 3.6.1)
+# broom                * 0.5.2     2019-04-07 [1] CRAN (R 3.6.1)
+# callr                  3.3.2     2019-09-22 [1] CRAN (R 3.6.1)
+# cli                    2.0.0     2019-12-09 [1] CRAN (R 3.6.1)
+# cluster                2.1.0     2019-06-19 [2] CRAN (R 3.6.1)
+# colorspace             1.4-1     2019-03-18 [2] CRAN (R 3.6.1)
+# cowplot              * 1.0.0     2019-07-11 [1] CRAN (R 3.6.1)
+# crayon                 1.3.4     2017-09-16 [2] CRAN (R 3.6.1)
+# data.table           * 1.12.8    2019-12-09 [1] CRAN (R 3.6.1)
+# DelayedArray         * 0.12.1    2019-12-17 [1] Bioconductor
+# desc                   1.2.0     2018-05-01 [1] CRAN (R 3.6.1)
+# devtools               2.2.1     2019-09-24 [1] CRAN (R 3.6.1)
+# digest                 0.6.23    2019-11-23 [1] CRAN (R 3.6.1)
+# dplyr                * 0.8.3     2019-07-04 [1] CRAN (R 3.6.1)
+# ellipsis               0.3.0     2019-09-20 [1] CRAN (R 3.6.1)
+# fansi                  0.4.0     2018-10-05 [2] CRAN (R 3.6.1)
+# farver                 2.0.1     2019-11-13 [1] CRAN (R 3.6.1)
+# fastmatch              1.1-0     2017-01-28 [1] CRAN (R 3.6.1)
+# fgsea                * 1.12.0    2019-10-29 [1] Bioconductor
+# fs                     1.3.1     2019-05-06 [1] CRAN (R 3.6.1)
+# generics               0.0.2     2018-11-29 [1] CRAN (R 3.6.1)
+# GenomeInfoDb         * 1.22.0    2019-10-29 [1] Bioconductor
+# GenomeInfoDbData       1.2.2     2019-12-07 [1] Bioconductor
+# GenomicAlignments      1.22.1    2019-11-12 [1] Bioconductor
+# GenomicRanges        * 1.38.0    2019-10-29 [1] Bioconductor
+# ggbeeswarm           * 0.6.0     2017-08-07 [1] CRAN (R 3.6.1)
+# ggplot2              * 3.2.1     2019-08-10 [1] CRAN (R 3.6.1)
+# ggrepel              * 0.8.1     2019-05-07 [1] CRAN (R 3.6.1)
+# glue                   1.3.1     2019-03-12 [2] CRAN (R 3.6.1)
+# gridExtra              2.3       2017-09-09 [1] CRAN (R 3.6.1)
+# gtable                 0.3.0     2019-03-25 [2] CRAN (R 3.6.1)
+# here                 * 0.1       2017-05-28 [1] CRAN (R 3.6.1)
+# IRanges              * 2.20.1    2019-11-20 [1] Bioconductor
+# labeling               0.3       2014-08-23 [2] CRAN (R 3.6.1)
+# lattice                0.20-38   2018-11-04 [2] CRAN (R 3.6.1)
+# lazyeval               0.2.2     2019-03-15 [2] CRAN (R 3.6.1)
+# lifecycle              0.1.0     2019-08-01 [2] CRAN (R 3.6.1)
+# lme4                 * 1.1-21    2019-03-05 [1] CRAN (R 3.6.1)
+# magrittr               1.5       2014-11-22 [2] CRAN (R 3.6.1)
+# margins              * 0.3.23    2018-05-22 [1] CRAN (R 3.6.1)
+# MASS                   7.3-51.4  2019-03-31 [2] CRAN (R 3.6.1)
+# Matrix               * 1.2-17    2019-03-22 [2] CRAN (R 3.6.1)
+# MatrixModels           0.4-1     2015-08-22 [1] CRAN (R 3.6.1)
+# matrixStats          * 0.55.0    2019-09-07 [1] CRAN (R 3.6.1)
+# memoise                1.1.0     2017-04-21 [2] CRAN (R 3.6.1)
+# minqa                  1.2.4     2014-10-09 [1] CRAN (R 3.6.1)
+# moments                0.14      2015-01-05 [1] CRAN (R 3.6.1)
+# msigdbr              * 7.0.1     2019-09-04 [1] CRAN (R 3.6.1)
+# MultiAssayExperiment * 1.12.0    2019-10-29 [1] Bioconductor
+# munsell                0.5.0     2018-06-12 [2] CRAN (R 3.6.1)
+# nlme                   3.1-140   2019-05-12 [2] CRAN (R 3.6.1)
+# nloptr                 1.2.1     2018-10-03 [1] CRAN (R 3.6.1)
+# pbmcapply            * 1.5.0     2019-07-10 [1] CRAN (R 3.6.1)
+# pillar                 1.4.3     2019-12-20 [1] CRAN (R 3.6.1)
+# pkgbuild               1.0.6     2019-10-09 [1] CRAN (R 3.6.1)
+# pkgconfig              2.0.3     2019-09-22 [1] CRAN (R 3.6.1)
+# pkgload                1.0.2     2018-10-29 [1] CRAN (R 3.6.1)
+# plyr                   1.8.5     2019-12-10 [1] CRAN (R 3.6.1)
+# prediction             0.3.14    2019-06-17 [1] CRAN (R 3.6.1)
+# prettyunits            1.0.2     2015-07-13 [2] CRAN (R 3.6.1)
+# processx               3.4.1     2019-07-18 [1] CRAN (R 3.6.1)
+# ps                     1.3.0     2018-12-21 [1] CRAN (R 3.6.1)
+# purrr                  0.3.3     2019-10-18 [1] CRAN (R 3.6.1)
+# quantreg               5.52      2019-11-09 [1] CRAN (R 3.6.1)
+# qvalue               * 2.18.0    2019-10-29 [1] Bioconductor
+# R6                     2.4.1     2019-11-12 [1] CRAN (R 3.6.1)
+# Rcpp                 * 1.0.3     2019-11-08 [1] CRAN (R 3.6.1)
+# RCurl                  1.95-4.12 2019-03-04 [1] CRAN (R 3.6.1)
+# remotes                2.1.0     2019-06-24 [1] CRAN (R 3.6.1)
+# reshape2               1.4.3     2017-12-11 [2] CRAN (R 3.6.1)
+# rlang                  0.4.2     2019-11-23 [1] CRAN (R 3.6.1)
+# rprojroot              1.3-2     2018-01-03 [1] CRAN (R 3.6.1)
+# Rsamtools              2.2.1     2019-11-06 [1] Bioconductor
+# rtracklayer          * 1.46.0    2019-10-29 [1] Bioconductor
+# S4Vectors            * 0.24.1    2019-12-01 [1] Bioconductor
+# scales                 1.1.0     2019-11-18 [1] CRAN (R 3.6.1)
+# SCnorm               * 1.8.2     2019-11-22 [1] Bioconductor
+# sessioninfo            1.1.1     2018-11-05 [1] CRAN (R 3.6.1)
+# SingleCellExperiment * 1.8.0     2019-10-29 [1] Bioconductor
+# SparseM                1.77      2017-04-23 [1] CRAN (R 3.6.1)
+# stringi                1.4.3     2019-03-12 [2] CRAN (R 3.6.1)
+# stringr                1.4.0     2019-02-10 [2] CRAN (R 3.6.1)
+# SummarizedExperiment * 1.16.1    2019-12-19 [1] Bioconductor
+# testthat               2.3.1     2019-12-01 [1] CRAN (R 3.6.1)
+# tibble                 2.1.3     2019-06-06 [1] CRAN (R 3.6.1)
+# tidyr                  1.0.0     2019-09-11 [1] CRAN (R 3.6.1)
+# tidyselect             0.2.5     2018-10-11 [2] CRAN (R 3.6.1)
+# usethis                1.5.1     2019-07-04 [1] CRAN (R 3.6.1)
+# vctrs                  0.2.1     2019-12-17 [1] CRAN (R 3.6.1)
+# vipor                  0.4.5     2017-03-22 [1] CRAN (R 3.6.1)
+# viridis              * 0.5.1     2018-03-29 [1] CRAN (R 3.6.1)
+# viridisLite          * 0.3.0     2018-02-01 [2] CRAN (R 3.6.1)
+# withr                  2.1.2     2018-03-15 [2] CRAN (R 3.6.1)
+# XML                    3.98-1.20 2019-06-06 [1] CRAN (R 3.6.1)
+# XVector                0.26.0    2019-10-29 [1] Bioconductor
+# zeallot                0.1.0     2018-01-28 [2] CRAN (R 3.6.1)
+# zlibbioc               1.32.0    2019-10-29 [1] Bioconductor
+# 
+# [1] /home-net/home-4/rmccoy22@jhu.edu/R/x86_64-pc-linux-gnu-library/3.6/gcc/5.5
+# [2] /software/apps/R/3.6.1/gcc/5.5.0/lib64/R/library
