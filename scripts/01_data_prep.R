@@ -1,26 +1,29 @@
-if (!requireNamespace("BiocManager", quietly = TRUE))
-  install.packages("BiocManager")
-
-BiocManager::install("BiocStyle")
-BiocManager::install("biomaRt")
-BiocManager::install("scran")
-
 list_of_packages <- c("BiocStyle", "biomaRt", "devtools", "dplyr", "here", "MultiAssayExperiment", 
                       "readxl", "scran", "tidyr")
 
 # Change global default setting so every data frame created will not auto-convert to factors unless explicitly instructed
 options(stringsAsFactors = FALSE)
 
-# Source my collection of functions
-# Easily install and load packages
-install_and_load_packages <- function(pkg){
-  new_packages <- list_of_packages[!(list_of_packages %in% installed.packages()[, "Package"])]
-  if(length(new_packages))
-    install.packages(new_packages, dependencies = TRUE)
-  sapply(list_of_packages, require, character.only = TRUE)
+# install and load packages
+# https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
+install.packages.auto <- function(x) { 
+  if(isTRUE(x %in% .packages(all.available = TRUE))) { 
+    eval(parse(text = sprintf("require(\"%s\")", x)))
+  } else { 
+    #update.packages(ask= FALSE) #update installed packages.
+    eval(parse(text = sprintf("install.packages(\"%s\", dependencies = TRUE)", x)))
+  }
+  if(isTRUE(x %in% .packages(all.available=TRUE))) { 
+    eval(parse(text = sprintf("require(\"%s\")", x)))
+  } else {
+    if (!requireNamespace("BiocManager", quietly = TRUE))
+      install.packages("BiocManager")
+    eval(parse(text = sprintf("BiocManager::install(\"%s\")", x, update = FALSE)))
+    eval(parse(text = sprintf("require(\"%s\")", x)))
+  }
 }
 
-install_and_load_packages(list_of_packages)
+lapply(list_of_packages, function(x) {message(x); install.packages.auto(x)})
 
 # Load EMTAB3929 data
 emtab3929_meta <- readRDS(here("RawData/EMTAB3929.rds"))
