@@ -1,6 +1,5 @@
-list_of_packages <- c("BiocStyle", "biomaRt", "devtools", "dplyr", "gplots", "gridExtra", 
-                      "here", "lme4", "MultiAssayExperiment", "readxl", "Rtsne", "scater", 
-                      "scploid", "scran", "tidyr", "umap")
+list_of_packages <- c("BiocStyle", "biomaRt", "devtools", "dplyr", "here", "MultiAssayExperiment", 
+                      "readxl", "scran", "tidyr")
 
 # Change global default setting so every data frame created will not auto-convert to factors unless explicitly instructed
 options(stringsAsFactors = FALSE)
@@ -15,15 +14,6 @@ install_and_load_packages <- function(pkg){
 }
 
 install_and_load_packages(list_of_packages)
-
-# Data were acquired for the human embryo (EMTAB3929) scRNA-seq aneuploidy project as follows:  
-# (1) EMTAB3929 data (PMID 27062923) were downloaded on 11/6/2018 from http://imlspenticton.uzh.ch:3838/conquer/.  
-# (a) MultiAssay Experiment (EMTAB3929.rds)  
-# (b) MultiQC report  
-# (c) Scater report  
-# (d) Salmon archive (EMTAB3929_salmo.tar and EMTAB3929 folder)  
-# (2) Supplementary files from Griffiths et al., 2017 were forked on 11/06/2018 from MarioniLab/Aneuploidy2017 on Github: https://github.com/MarioniLab/Aneuploidy2017.  
-# (3) Data from Griffiths et al., 2017 were downloaded on 11/14/2018 using the shell script supplied in their supplementary files (sh get_data.sh)  
 
 # Load EMTAB3929 data
 emtab3929_meta <- readRDS(here("RawData/EMTAB3929.rds"))
