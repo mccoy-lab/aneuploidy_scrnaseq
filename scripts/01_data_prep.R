@@ -1,3 +1,10 @@
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("BiocStyle")
+BiocManager::install("biomaRt")
+BiocManager::install("scran")
+
 list_of_packages <- c("BiocStyle", "biomaRt", "devtools", "dplyr", "here", "MultiAssayExperiment", 
                       "readxl", "scran", "tidyr")
 
