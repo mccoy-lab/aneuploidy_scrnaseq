@@ -1,15 +1,26 @@
 list_of_packages <- c("cowplot", "data.table", "dplyr", "here", "httr", 
                       "ggdendro", "lme4", "margins", "readxl", "tidyverse")
 
-# Easily install and load packages
-install_and_load_packages <- function(pkg){
-  new_packages <- list_of_packages[!(list_of_packages %in% installed.packages()[, "Package"])]
-  if(length(new_packages))
-    install.packages(new_packages, dependencies = TRUE)
-  sapply(list_of_packages, require, character.only = TRUE)
+# install and load packages
+# https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
+install.packages.auto <- function(x) { 
+  if(isTRUE(x %in% .packages(all.available = TRUE))) { 
+    eval(parse(text = sprintf("require(\"%s\")", x)))
+  } else { 
+    #update.packages(ask= FALSE) #update installed packages.
+    eval(parse(text = sprintf("install.packages(\"%s\", dependencies = TRUE)", x)))
+  }
+  if(isTRUE(x %in% .packages(all.available=TRUE))) { 
+    eval(parse(text = sprintf("require(\"%s\")", x)))
+  } else {
+    if (!requireNamespace("BiocManager", quietly = TRUE))
+      install.packages("BiocManager")
+    eval(parse(text = sprintf("BiocManager::install(\"%s\")", x, update = FALSE)))
+    eval(parse(text = sprintf("require(\"%s\")", x)))
+  }
 }
 
-install_and_load_packages(list_of_packages)
+lapply(list_of_packages, function(x) {message(x); install.packages.auto(x)})
 
 # zhu et al. 2018
 url <- "https://static-content.springer.com/esm/art%3A10.1038%2Fs41588-017-0007-6/MediaObjects/41588_2017_7_MOESM3_ESM.xlsx"
