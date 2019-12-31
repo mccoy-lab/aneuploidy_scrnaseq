@@ -8,6 +8,9 @@ list_of_packages <- c("BiocStyle", "biomaRt", "broom", "cowplot", "data.table", 
 # install scploid
 devtools::install_github("MarioniLab/Aneuploidy2017", subdir = "package")
 
+# install TreeBH
+install.packages("https://odin.mdacc.tmc.edu/~cbpeterson/TreeBH_1.0.tar.gz", repos = NULL, type = "source")
+
 # install and load packages
 # https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
 install.packages.auto <- function(x) { 
