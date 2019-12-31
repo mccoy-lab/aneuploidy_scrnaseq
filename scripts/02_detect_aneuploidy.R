@@ -2,8 +2,8 @@ list_of_packages <- c("BiocStyle", "biomaRt", "broom", "cowplot", "data.table", 
                       "dplyr", "ggdendro", "ggrepel", "gmodels", "gplots", "gridExtra", 
                       "here", "lme4", "margins", "mixtools", "monocle3", "mppa", "MultiAssayExperiment", 
                       "MultiAssayExperiment", "plyr", "readxl", "Rtsne", "scales", 
-                      "scater", "scploid", "scran", "stringr", "SummarizedExperiment", 
-                      "survcomp", "tidyr", "tools", "TreeBH", "umap", "zoo")
+                      "scater", "scploid", "scran", "stringr", "survcomp", "tidyr", 
+                      "tools", "TreeBH", "umap", "zoo")
 
 # install scploid
 devtools::install_github("MarioniLab/Aneuploidy2017", subdir = "package")
@@ -11,7 +11,15 @@ devtools::install_github("MarioniLab/Aneuploidy2017", subdir = "package")
 # install TreeBH
 install.packages("https://odin.mdacc.tmc.edu/~cbpeterson/TreeBH_1.0.tar.gz", repos = NULL, type = "source")
 
-# install and load packages
+# install monocle3
+BiocManager::install(c('BiocGenerics', 'DelayedArray', 'DelayedMatrixStats',
+                       'limma', 'S4Vectors', 'SingleCellExperiment',
+                       'SummarizedExperiment', 'batchelor'))
+devtools::install_github('cole-trapnell-lab/leidenbase')
+devtools::install_github('cole-trapnell-lab/monocle3')
+
+
+# install and load other packages
 # https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
 install.packages.auto <- function(x) { 
   if(isTRUE(x %in% .packages(all.available = TRUE))) { 
