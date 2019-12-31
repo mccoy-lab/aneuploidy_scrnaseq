@@ -5,24 +5,9 @@ list_of_packages <- c("BiocStyle", "biomaRt", "broom", "cowplot", "data.table", 
                       "scater", "scploid", "scran", "stringr", "survcomp", "tidyr", 
                       "tools", "TreeBH", "umap", "zoo")
 
-# install scploid
-devtools::install_github("MarioniLab/Aneuploidy2017", subdir = "package")
-
-# install TreeBH
-install.packages("https://odin.mdacc.tmc.edu/~cbpeterson/TreeBH_1.0.tar.gz", repos = NULL, type = "source")
-
-# install monocle3
-BiocManager::install(c('BiocGenerics', 'DelayedArray', 'DelayedMatrixStats',
-                       'limma', 'S4Vectors', 'SingleCellExperiment',
-                       'SummarizedExperiment', 'batchelor'))
-devtools::install_github('cole-trapnell-lab/leidenbase')
-devtools::install_github('cole-trapnell-lab/monocle3')
-
-
-# install and load other packages
 # https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
 install.packages.auto <- function(x) { 
-  if(isTRUE(x %in% .packages(all.available = TRUE))) { 
+  if (isTRUE(x %in% .packages(all.available = TRUE))) { 
     eval(parse(text = sprintf("require(\"%s\")", x)))
   } else { 
     #update.packages(ask= FALSE) #update installed packages.
@@ -38,6 +23,25 @@ install.packages.auto <- function(x) {
   }
 }
 
+# install scploid
+if (!("scploid" %in% .packages(all.available = TRUE)))
+  devtools::install_github("MarioniLab/Aneuploidy2017", subdir = "package")
+
+# install TreeBH
+if (!("TreeBH" %in% .packages(all.available = TRUE)))
+  install.packages("https://odin.mdacc.tmc.edu/~cbpeterson/TreeBH_1.0.tar.gz", repos = NULL, type = "source")
+
+# install monocle3
+if (!("monocle3" %in% .packages(all.available = TRUE))) {
+  monocle_prereqs <- c('BiocGenerics', 'DelayedArray', 'DelayedMatrixStats',
+                       'limma', 'S4Vectors', 'SingleCellExperiment',
+                       'SummarizedExperiment', 'batchelor')
+  lapply(monocle_prereqs, function(x) {message(x); install.packages.auto(x)})
+  devtools::install_github('cole-trapnell-lab/leidenbase')
+  devtools::install_github('cole-trapnell-lab/monocle3')
+}
+
+# install and load other packages
 lapply(list_of_packages, function(x) {message(x); install.packages.auto(x)})
 
 # over-ride masked functions
