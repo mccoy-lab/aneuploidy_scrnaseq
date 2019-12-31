@@ -1,10 +1,9 @@
 list_of_packages <- c("BiocStyle", "biomaRt", "broom", "cowplot", "data.table", "devtools", 
                       "dplyr", "ggdendro", "ggrepel", "gmodels", "gplots", "gridExtra", 
-                      "here", "lme4", "margins", "MAST", "metap", "mixtools", "monocle3", 
-                      "mppa", "MultiAssayExperiment", "MultiAssayExperiment", "plyr", 
-                      "readxl", "Rtsne", "scales", "scater", "scploid", "scran", "SMITE", 
-                      "stringr", "SummarizedExperiment", "survcomp", "tidyr", "tools", 
-                      "TreeBH", "umap", "zoo")
+                      "here", "lme4", "margins", "mixtools", "monocle3", "mppa", "MultiAssayExperiment", 
+                      "MultiAssayExperiment", "plyr", "readxl", "Rtsne", "scales", 
+                      "scater", "scploid", "scran", "stringr", "SummarizedExperiment", 
+                      "survcomp", "tidyr", "tools", "TreeBH", "umap", "zoo")
 
 # install and load packages
 # https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
