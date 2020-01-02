@@ -1,4 +1,4 @@
-## Code associated with "Single-cell analysis of human embryos reveals widespread and complex patterns of aneuploidy and mosaicism".
+## Code associated with "Single-cell analysis of human embryos reveals diverse patterns of aneuploidy and mosaicism".
 
 ### Authors: Margaret R. Starostik, Olukayode A. Sosina, Rajiv C. McCoy
 
