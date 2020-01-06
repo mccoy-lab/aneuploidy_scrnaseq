@@ -184,7 +184,7 @@ group_sample <- list()
 sample_mean <- list()
 sample_sd <- list()
 
-for (k in 1:length(spt)){
+for (k in 1:length(spt)) {
   
   group[[k]] <- spt[[k]]@cpm
   group[[k]] <- group[[k]][rowMedians(group[[k]]) > test_median, ]
@@ -199,14 +199,14 @@ for (k in 1:length(spt)){
   
 }
 
-means <- as.data.frame(do.call("cbind", sample_mean))
+means <- do.call("cbind", sample_mean) %>% as.data.frame()
 colnames(means) <- names(spt)
 means$t21_trisomy <- t21_trisomy_mean[t21_trisomy_sample]
 means$t21_normal <- t21_norm_mean[t21_norm_sample]
 means$emb8_reversine <- emb8_reversine_mean[emb8_reversine_sample]
 means$emb8_control <- emb8_control_mean[emb8_control_sample]
 
-variances <- as.data.frame(do.call("cbind", sample_sd))
+variances <- do.call("cbind", sample_sd) %>% as.data.frame()
 colnames(variances) <- names(spt)
 variances$t21_trisomy <- t21_trisomy_sd[t21_trisomy_sample]
 variances$t21_normal <- t21_norm_sd[t21_norm_sample]
@@ -216,48 +216,65 @@ variances$emb8_control <- emb8_control_sd[emb8_control_sample]
 means_long <- reshape2::melt(means)
 variances_long <- reshape2::melt(variances)
 
-mean_variance <- data.frame(
+mean_variance <- data.table(
   sample = means_long$variable,
   mean = means_long$value,
   variance = variances_long$value
 )
+mean_variance[, c("stage", "lineage") := tstrsplit(sample, "_", fixed = TRUE)]
 
-intercept_slope <- as.data.frame(t(sapply(list(group_lm[[1]],
-                                               group_lm[[2]],
-                                               group_lm[[3]],
-                                               group_lm[[4]],
-                                               group_lm[[5]],
-                                               group_lm[[6]],
-                                               group_lm[[7]],
-                                               group_lm[[8]],
-                                               group_lm[[9]],
-                                               group_lm[[10]],
-                                               group_lm[[11]],
-                                               t21_trisomy_lm, 
-                                               t21_norm_lm, 
-                                               emb8_reversine_lm, 
-                                               emb8_control_lm), coef)))
-intercept_slope$sample <- colnames(variances)
+intercept_slope <- t(sapply(list(group_lm[[1]], 
+                                 group_lm[[2]],
+                                 group_lm[[3]],
+                                 group_lm[[4]],
+                                 group_lm[[5]],
+                                 group_lm[[6]],
+                                 group_lm[[7]],
+                                 group_lm[[8]],
+                                 group_lm[[9]],
+                                 group_lm[[10]],
+                                 group_lm[[11]],
+                                 t21_trisomy_lm, 
+                                 t21_norm_lm, 
+                                 emb8_reversine_lm, 
+                                 emb8_control_lm), coef)) %>%
+  as.data.table()
 
-ggplot(mean_variance,aes (x = mean, y = variance, col = sample)) + 
-  geom_point(size = 1, alpha = 0.5) +  
-  scale_x_log10() + scale_y_log10() +
-  theme_bw() +
-  scale_color_manual(values = c("t21_trisomy" = "grey34", "t21_normal" = "grey34",
-                                "emb8_reversine" = "grey77", "emb8_control" = "grey77",
-                                "E4_Undefined" = "goldenrod1",
-                                "E5_ICM" = "darkolivegreen3",
-                                "E5_Trophectoderm" = "darkolivegreen3",
-                                "E5_Undefined" = "darkolivegreen3",
-                                "E6_Trophectoderm" = "deepskyblue3",
-                                "E6_Primitive Endoderm" = "deepskyblue3",
-                                "E6_Epiblast" = "deepskyblue3",
-                                "E7_Trophectoderm" = "darkorchid3",
-                                "E7_Intermediate" = "darkorchid3",
-                                "E7_Epiblast" = "darkorchid3",
-                                "E7_Primitive Endoderm" = "darkorchid3"), name = "") +
-  geom_abline(data = intercept_slope, aes(slope = `log10(group_mean[[k]])`, intercept = `(Intercept)`, col = sample), alpha = 0.8, lwd = 1.5) +
-  labs(x = expression("log"[10]*"(mean)"), y = expression("log"[10]* "(standard deviation)")) 
+intercept_slope[, sample := colnames(variances)]
+intercept_slope[, c("stage", "lineage") := tstrsplit(sample, "_", fixed = TRUE)]
+
+plot_mean_sd <- function(day, mean_variance_dt, intercept_slope_dt) {
+  mean_variance_dt$facet_title <- day
+  intercept_slope_dt$facet_title <- day
+  mean_sd_plot <- ggplot(mean_variance_dt[stage == day | (sample %in% c("t21_trisomy", "t21_normal", "emb8_reversine", "emb8_control"))], 
+                         aes(x = mean, y = variance, col = sample)) + 
+    geom_point(size = 1, alpha = 0.5) +  
+    scale_x_log10() + scale_y_log10() +
+    theme_classic() +
+    scale_color_manual(values = c("t21_trisomy" = "grey34", "t21_normal" = "grey34",
+                                  "emb8_reversine" = "grey77", "emb8_control" = "grey77",
+                                  "E4_Undefined" = "#1b9e77",
+                                  "E5_ICM" = "#d95f02",
+                                  "E5_Trophectoderm" = "#7570b3",
+                                  "E5_Undefined" = "#1b9e77",
+                                  "E6_Trophectoderm" = "#7570b3",
+                                  "E6_Primitive Endoderm" = "#e6ab02",
+                                  "E6_Epiblast" = "#66a61e",
+                                  "E7_Trophectoderm" = "#7570b3",
+                                  "E7_Intermediate" = "e7298a",
+                                  "E7_Epiblast" = "#66a61e",
+                                  "E7_Primitive Endoderm" = "#e6ab02"), name = "") +
+    geom_abline(data = intercept_slope_dt[stage == day | (sample %in% c("t21_trisomy", "t21_normal", "emb8_reversine", "emb8_control"))], 
+                aes(slope = `log10(group_mean[[k]])`, intercept = `(Intercept)`, col = sample), alpha = 0.8, lwd = 1.5) +
+    labs(x = expression("log"[10]*"(mean)"), y = expression("log"[10]* "(standard deviation)")) +
+    facet_wrap(~ facet_title)
+  
+  return(mean_sd_plot)
+}
+
+mean_sd_plots <- lapply(paste0("E", 4:7), function(x) plot_mean_sd(x, mean_variance, intercept_slope))
+
+plot_grid(plotlist = mean_sd_plots, ncol = 2, align = "hv", axis = "tblr")
 
 # run scploid
 expression_results <- do.call(rbind, lapply(spt, calcAneu)) %>%
