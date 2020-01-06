@@ -51,6 +51,10 @@ summarize <- dplyr::summarize
 # Change global default setting so every data frame created will not auto-convert to factors unless explicitly instructed
 options(stringsAsFactors = FALSE) 
 
+# Load data from mouse 8-cell stage G&T-seq and human Trisomy 21 G&T-seq
+load(here("RawData/proc_data/emb8_data.RData"))
+load(here("RawData/proc_data/tris_data.RData"))
+
 # Load processed EMTAB3929 data and check data
 load(here("ProcessedData/EMTAB3929_DataPrep.RData"))
 dim(annotation) # 56,400 genes
@@ -128,6 +132,132 @@ plot_grid(pca_fig, qc_fig, labels = c("A", "B"), ncol = 1, rel_heights = c(1, 0.
 
 # subset data to stage/cell-type groups that pass QC
 spt <- spt[names(spt) %in% groups_qc_pass]
+
+# apply methods from Griffiths et al. (https://github.com/MarioniLab/Aneuploidy2017) to assess gene expression variance 
+test_median <- 50
+sample_size <- 1000
+set.seed(12983)
+
+## human trisomy 21 G&T-seq data
+t21_trisomy <- getCPM(splitCellsByGroup(t21)[["T21"]])
+t21_norm <- getCPM(splitCellsByGroup(t21)[["Diploid"]])
+
+t21_trisomy_HEXP <- t21_trisomy[apply(t21_trisomy, 1, median) > test_median, ]
+t21_norm_HEXP <- t21_norm[apply(t21_norm, 1, median) > test_median, ]
+
+t21_trisomy_mean <- apply(t21_trisomy_HEXP, 1, mean)
+t21_trisomy_sd <- apply(t21_trisomy_HEXP, 1, sd)
+t21_norm_mean <- apply(t21_norm_HEXP, 1, mean)
+t21_norm_sd <- apply(t21_norm_HEXP, 1, sd)
+
+t21_trisomy_lm <- lm(log10(t21_trisomy_sd) ~ log10(t21_trisomy_mean))
+t21_norm_lm <- lm(log10(t21_norm_sd) ~ log10(t21_norm_mean))
+
+t21_trisomy_sample <- sample(length(t21_trisomy_mean), sample_size)
+t21_norm_sample <- sample(length(t21_norm_mean), sample_size)
+
+## mouse embryo G&T-seq data
+emb8_reversine <- getCPM(splitCellsByGroup(emb8)[["Reversine"]])
+emb8_control <- getCPM(splitCellsByGroup(emb8)[["Control"]])
+
+emb8_reversine <- emb8_reversine[rowMedians(emb8_reversine) > test_median, ]
+emb8_control <- emb8_control[rowMedians(emb8_control) > test_median,]
+
+emb8_reversine_mean <- rowMeans(emb8_reversine)
+emb8_reversine_sd <- apply(emb8_reversine, 1, sd)
+emb8_control_mean <- rowMeans(emb8_control)
+emb8_control_sd <- apply(emb8_control, 1, sd)
+
+emb8_reversine_lm <- lm(log10(emb8_reversine_sd) ~ log10(emb8_reversine_mean))
+emb8_control_lm <- lm(log10(emb8_control_sd) ~ log10(emb8_control_mean))
+
+emb8_reversine_sample <- sample(length(emb8_reversine_mean), sample_size)
+emb8_control_sample <- sample(length(emb8_control_mean), sample_size)
+
+## human EMTAB3929 scRNA-seq data
+group <- list()
+group_mean <- list()
+group_sd <- list()
+group_lm <- list()
+group_sample <- list()
+
+sample_mean <- list()
+sample_sd <- list()
+
+for (k in 1:length(spt)){
+  
+  group[[k]] <- spt[[k]]@cpm
+  group[[k]] <- group[[k]][rowMedians(group[[k]]) > test_median, ]
+  
+  group_mean[[k]] <- rowMeans(group[[k]])
+  group_sd[[k]] <- apply(group[[k]], 1, sd)
+  group_lm[[k]] <- lm(log10(group_sd[[k]]) ~ log10(group_mean[[k]]))
+  group_sample[[k]] <- sample(length(group_mean[[k]]), sample_size)
+  
+  sample_mean[[k]] <- group_mean[[k]][group_sample[[k]]]
+  sample_sd[[k]] <- group_sd[[k]][group_sample[[k]]]
+  
+}
+
+means <- as.data.frame(do.call("cbind", sample_mean))
+colnames(means) <- names(spt)
+means$t21_trisomy <- t21_trisomy_mean[t21_trisomy_sample]
+means$t21_normal <- t21_norm_mean[t21_norm_sample]
+means$emb8_reversine <- emb8_reversine_mean[emb8_reversine_sample]
+means$emb8_control <- emb8_control_mean[emb8_control_sample]
+
+variances <- as.data.frame(do.call("cbind", sample_sd))
+colnames(variances) <- names(spt)
+variances$t21_trisomy <- t21_trisomy_sd[t21_trisomy_sample]
+variances$t21_normal <- t21_norm_sd[t21_norm_sample]
+variances$emb8_reversine <- emb8_reversine_sd[emb8_reversine_sample]
+variances$emb8_control <- emb8_control_sd[emb8_control_sample]
+
+means_long <- reshape2::melt(means)
+variances_long <- reshape2::melt(variances)
+
+mean_variance <- data.frame(
+  sample = means_long$variable,
+  mean = means_long$value,
+  variance = variances_long$value
+)
+
+intercept_slope <- as.data.frame(t(sapply(list(group_lm[[1]],
+                                               group_lm[[2]],
+                                               group_lm[[3]],
+                                               group_lm[[4]],
+                                               group_lm[[5]],
+                                               group_lm[[6]],
+                                               group_lm[[7]],
+                                               group_lm[[8]],
+                                               group_lm[[9]],
+                                               group_lm[[10]],
+                                               group_lm[[11]],
+                                               t21_trisomy_lm, 
+                                               t21_norm_lm, 
+                                               emb8_reversine_lm, 
+                                               emb8_control_lm), coef)))
+intercept_slope$sample <- colnames(variances)
+
+ggplot(mean_variance,aes (x = mean, y = variance, col = sample)) + 
+  geom_point(size = 1, alpha = 0.5) +  
+  scale_x_log10() + scale_y_log10() +
+  theme_bw() +
+  scale_color_manual(values = c("t21_trisomy" = "grey34", "t21_normal" = "grey34",
+                                "emb8_reversine" = "grey77", "emb8_control" = "grey77",
+                                "E4_Undefined" = "goldenrod1",
+                                "E5_ICM" = "darkolivegreen3",
+                                "E5_Trophectoderm" = "darkolivegreen3",
+                                "E5_Undefined" = "darkolivegreen3",
+                                "E6_Trophectoderm" = "deepskyblue3",
+                                "E6_Primitive Endoderm" = "deepskyblue3",
+                                "E6_Epiblast" = "deepskyblue3",
+                                "E7_Trophectoderm" = "darkorchid3",
+                                "E7_Intermediate" = "darkorchid3",
+                                "E7_Epiblast" = "darkorchid3",
+                                "E7_Primitive Endoderm" = "darkorchid3"), name = "") +
+  geom_abline(data = intercept_slope, aes(slope = `log10(group_mean[[k]])`, intercept = `(Intercept)`, col = sample), alpha = 0.8, lwd = 1.5) +
+  labs(x = expression("log"[10]*"(mean)"), y = expression("log"[10]* "(standard deviation)")) 
 
 # run scploid
 expression_results <- do.call(rbind, lapply(spt, calcAneu)) %>%

@@ -4,7 +4,10 @@ mkdir -p ../RawData
 if [ ! -f ../RawData/EMTAB3929.rds ]; then
     wget -O ../RawData/EMTAB3929.rds http://imlspenticton.uzh.ch/robinson_lab/conquer/data-mae/EMTAB3929.rds
 fi
-
+if [ ! -f ../RawData/proc_data ]; then
+    curl https://jmlab-gitlab.cruk.cam.ac.uk/Jonny/Aneuploidy2017Data/raw/master/aneu_proc.tar.gz > ../RawData/aneu_proc.tar.gz
+    tar -xzf ../RawData/aneu_proc.tar.gz -C ../RawData/
+fi
 mkdir -p ../external_metadata
 if [ ! -f ../external_metadata/stirparo2018_tableS4.xlsx ]; then
     wget -O ../external_metadata/stirparo2018_tableS4.xlsx http://www.biologists.com/DEV_Movies/DEV158501/TableS4.xlsx
