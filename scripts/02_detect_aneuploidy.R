@@ -248,7 +248,7 @@ plot_mean_sd <- function(day, mean_variance_dt, intercept_slope_dt) {
   intercept_slope_dt$facet_title <- day
   mean_sd_plot <- ggplot(mean_variance_dt[stage == day | (sample %in% c("t21_trisomy", "t21_normal", "emb8_reversine", "emb8_control"))], 
                          aes(x = mean, y = variance, col = sample)) + 
-    geom_point(size = 1, alpha = 0.5) +  
+    geom_point(size = 0.75, alpha = 0.5) +  
     scale_x_log10() + scale_y_log10() +
     theme_classic() +
     scale_color_manual(values = c("t21_trisomy" = "grey34", "t21_normal" = "grey34",
@@ -261,11 +261,11 @@ plot_mean_sd <- function(day, mean_variance_dt, intercept_slope_dt) {
                                   "E6_Primitive Endoderm" = "#e6ab02",
                                   "E6_Epiblast" = "#66a61e",
                                   "E7_Trophectoderm" = "#7570b3",
-                                  "E7_Intermediate" = "e7298a",
+                                  "E7_Intermediate" = "#e7298a",
                                   "E7_Epiblast" = "#66a61e",
                                   "E7_Primitive Endoderm" = "#e6ab02"), name = "") +
     geom_abline(data = intercept_slope_dt[stage == day | (sample %in% c("t21_trisomy", "t21_normal", "emb8_reversine", "emb8_control"))], 
-                aes(slope = `log10(group_mean[[k]])`, intercept = `(Intercept)`, col = sample), alpha = 0.8, lwd = 1.5) +
+                aes(slope = `log10(group_mean[[k]])`, intercept = `(Intercept)`, col = sample), alpha = 0.8, lwd = 1) +
     labs(x = expression("log"[10]*"(mean)"), y = expression("log"[10]* "(standard deviation)")) +
     facet_wrap(~ facet_title)
   
