@@ -10,6 +10,7 @@
 
 `04_dge.R`  -  Perform differential expression analysis to quantify global responses to aneuploidy in single cells of human embryos.
 
+`05_dge.R`  -  Perform simulations of single-cell gene expression (adapted from Griffiths et al., 2017) and allelic imbalance impacts of aneuploidy to assess performance when combining these signatures.
 
 ## References
 
