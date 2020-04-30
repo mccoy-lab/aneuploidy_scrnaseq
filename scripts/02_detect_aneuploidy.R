@@ -292,7 +292,6 @@ setnames(expression_results, "score", "scploid_score")
 setnames(expression_results, "p", "scploid_p")
 
 ## add ASE data
-
 if (file.exists(here("results/ase_by_chr.txt"))) {
   ase_by_chr <- fread(here("results/ase_by_chr.txt"))
 } else {
@@ -464,16 +463,29 @@ cell_fraction_plot <- ggplot(data = cell_fraction) +
   xlab("Prop. aneuploid cells") +
   ylab("Number of embryos")
 
+plot_grid(fdr_plot, cell_fraction_plot, labels = c('A', 'B'))
+
 chr_fraction <- group_by(results, EStage, embryo, chr) %>%
   summarize(., prop_aneuploid = mean(sig_chrom), n = n()) %>%
   as.data.table()
 
-length(unique(chr_fraction[prop_aneuploid >= 0.75]$embryo))
-length(unique(chr_fraction[prop_aneuploid > 0 & prop_aneuploid < 0.75]$embryo))
-sum(unique(chr_fraction[prop_aneuploid >= 0.75]$embryo) %in% 
-      unique(chr_fraction[prop_aneuploid > 0 & prop_aneuploid < 0.75]$embryo))
+# count meiotic and mitotic aneuploidies; 75% criterion
+meiotic_75 <- unique(chr_fraction[prop_aneuploid >= 0.75]$embryo) # meiotic
+mitotic_75 <- unique(chr_fraction[prop_aneuploid > 0 & prop_aneuploid < 0.75]$embryo) # mitotic
+length(meiotic_75[!(meiotic_75 %in% mitotic_75)])
+length(mitotic_75[!(mitotic_75 %in% meiotic_75)])
+sum(mitotic_75 %in% meiotic_75)
 
-plot_grid(fdr_plot, cell_fraction_plot, labels = c('A', 'B'))
+# count meiotic and mitotic aneuploidies; <2 normal chromosomes criterion
+results[, embryo_chr := paste(embryo, chr, sep = ".")]
+aneuploid_by_embryo_chr <- group_by(results, embryo, chr) %>%
+  summarize(aneuploid_cells = sum(sig_chrom == 1), euploid_cells = sum(sig_chrom == 0)) %>%
+  as.data.table()
+meiotic_less2cell <- unique(aneuploid_by_embryo_chr[euploid_cells < 2]$embryo)
+mitotic_less2cell <- unique(aneuploid_by_embryo_chr[aneuploid_cells > 0 & euploid_cells >= 2]$embryo)
+length(meiotic_less2cell[!(meiotic_less2cell %in% mitotic_less2cell)])
+length(mitotic_less2cell[!(mitotic_less2cell %in% meiotic_less2cell)])
+sum(mitotic_less2cell %in% meiotic_less2cell)
 
 # calculate aneuploidies per chromosome
 aneuploid_by_chr <- group_by(results, chr) %>%
@@ -505,7 +517,9 @@ by_chrom_plot <- ggplot(data = aneuploid_by_chr, aes(x = n_genes , y = aneuploid
 
 m1 <- glmer(data = results, formula = (sig_chrom == 1) ~ (1 | embryo / cell) + (1 | lineage) + chr, family = binomial, nAGQ = 0)
 m0 <- glmer(data = results, formula = (sig_chrom == 1) ~ (1 | embryo / cell) + (1 | lineage), family = binomial, nAGQ = 0)
-anova(m1, m0, test = "Chisq") # embryo-specific models; to average over levels of random effect, need to extract average marginal effects as below
+anova(m1, m0, test = "Chisq") 
+
+# embryo-specific models; to average over levels of random effect, need to extract average marginal effects as below
 mx <- margins(m1, type = "response", variables = "chr")
 b <- summary(mx)
 cov_mat <- attr(mx, "vcov")
@@ -541,8 +555,16 @@ ggplot() +
   xlab("scploid z-score") +
   ylab("Allelic imbalance z-score")
 
-# plot aneuploidy heatmaps for individual embryos
+# plot number of aneuploid chromosomes per cell
+aneuploid_per_cell_plot <- group_by(results, cell) %>% 
+  summarize(n_aneuploid_chrom = sum(ploidy != 2)) %>% 
+  ggplot(aes(x = n_aneuploid_chrom)) +
+  geom_histogram(bins = 24) +
+  theme_classic() +
+  xlab("Number of aneuploid chromosomes") +
+  ylab("Number of cells")
 
+# plot aneuploidy heatmaps for individual embryos
 results[, chr_num := gsub("chr", "", chr)]
 results$chr_num <- factor(results$chr_num, levels = 1:22)
 results[, log_fisher_p := -log10(fisher_p)]
@@ -584,11 +606,12 @@ plot_mca <- function(embryo_id, combine = FALSE, legend = TRUE, cluster_method =
     ylab("Cell") +
     theme(axis.text.y = element_blank(), panel.grid = element_blank())
   
-  heatmap <- ggplot(data = dt_to_plot, aes(x = chr_num, y = cell, fill = monosomy, alpha = log_fisher_p + 1)) +
+  dt_to_plot[monosomy == TRUE, log_fisher_p := -1 * log_fisher_p]
+  
+  heatmap <- ggplot(data = dt_to_plot, aes(x = chr_num, y = cell, fill = log_fisher_p)) +
     geom_tile() +
     theme_bw() +
-    scale_fill_manual(name = "", values = c("red", "blue"), labels = c("Trisomy", "Monosomy")) +
-    scale_alpha(name = "-log10(p)", range = c(0, 1), limits = c(2, 6), na.value = 1, oob = squish) +
+    scale_fill_gradientn(name = "-log10(p)", colors = c("blue", "white", "white", "red"), limits = c(-5, 5), oob = squish) +
     xlab("Chromosome") +
     ylab("") +
     theme(axis.text.y = element_blank(), plot.margin = unit(c(5.5, 5.5, 5.5, -3), "pt"), panel.grid = element_blank())
@@ -598,42 +621,6 @@ plot_mca <- function(embryo_id, combine = FALSE, legend = TRUE, cluster_method =
   } else {
     plot_grid(exp_heatmap, ase_heatmap, align = "h", axis = "b", rel_widths = c(1, 1))
   }
-}
-
-plot_mca_sig <- function(embryo_id) {
-  heatmap_data <- pivot_wider(results[(embryo == embryo_id), c("chr_num", "cell", "ploidy")], names_from = chr_num, values_from = ploidy)
-  heatmap_matrix <- as.matrix(heatmap_data[, -1])
-  rownames(heatmap_matrix) <- heatmap_data$cell
-  
-  distance.row <- dist(heatmap_matrix, method = "euclidean") # same parameters as honeyBADGER
-  cluster.row <- hclust(distance.row, method = "ward.D") # same parameters as honeyBADGER
-  
-  dendrogram <- ggplot(segment(dendro_data(cluster.row))) + 
-    geom_segment(aes(x=x, y=y, xend=xend, yend=yend)) + 
-    coord_flip() + 
-    scale_y_reverse(expand=c(0.2, 0)) + 
-    theme_dendro() + 
-    scale_x_reverse()
-  
-  sample_order <- rev(cluster.row$labels[cluster.row$order])
-  
-  dt_to_plot <- results[embryo == embryo_id]
-  dt_to_plot$cell <- factor(dt_to_plot$cell, levels = sample_order)
-  dt_to_plot[, polarized_log_fisher_p := log_fisher_p]
-  dt_to_plot[monosomy == TRUE, polarized_log_fisher_p := -1 * log_fisher_p]
-  dt_to_plot[allelic_ratio < 0.1, polarized_log_fisher_p := -1 * log_fisher_p]
-  
-  dt_to_plot$ploidy_factor <- factor(dt_to_plot$ploidy, levels = c(1, 2, 3))
-  
-  heatmap <- ggplot(data = dt_to_plot, aes(x = chr_num, y = cell, fill = ploidy_factor)) +
-    geom_tile() +
-    theme_bw() +
-    scale_fill_manual(name = "Ploidy", values = c("blue", "white", "red"), drop = FALSE) +
-    xlab("Chromosome") +
-    ylab("") +
-    theme(axis.text.y = element_blank(), plot.margin = unit(c(5.5, 5.5, 5.5, 0), "pt"))
-  
-  plot_grid(dendrogram, heatmap, align = "h", rel_widths = c(0.3, 1), rel_heights = c(1.1, 1))
 }
 
 for (embryo_id in unique(results$embryo)) {
@@ -648,13 +635,33 @@ plot_c <- plot_mca("E7.17", combine = TRUE, cluster_method = "average", dist_met
 plot_d <- plot_mca("E7.5", combine = TRUE, cluster_method = "average", dist_method = "euclidean")
 plot_grid(plot_a, plot_b, plot_c, plot_d, ncol = 2, nrow = 2, labels = c('A', 'B', 'C', 'D'))
 
-### statistical models of cell-type-specificity
+# examine parental origin of haploidy in embryo E7.5
+
+if (exists("ase")) {
+  hi_ex_het_snps <- ase[cell == "E7.5.232" & refCount > 4 & altCount > 4]$embryo_snp_id
+  
+  near_haploid_dt <- ase[embryo == "E7.5" & embryo_snp_id %in% hi_ex_het_snps & cell %in% results$cell] %>%
+    setorder(embryo_snp_id, embryo, cell)
+  
+  near_haploid_dt[, altRatio := altCount / totalCount]
+  
+  ggplot(data = near_haploid_dt[totalCount > 8], aes(x = cell, y = embryo_snp_id, fill = altRatio)) +
+    geom_tile() +
+    scale_fill_viridis_c(name = "B-allele frequency") +
+    xlab("Cell") +
+    ylab("SNP") +
+    theme(axis.text.y = element_blank(), panel.grid = element_blank())
+}
+
+## statistical models of stage and cell-type differences
 
 results[, num_estage := scale(as.numeric(gsub("E", "", EStage)) - 3)]
 
 m1 <- glmer(data = results[!duplicated(cell)], 
-            formula = sig_cell ~ num_estage + (1 | embryo) + lineage, 
+            formula = sig_cell ~ (1 | embryo) + num_estage + lineage, 
             family = binomial)
+
+summary(margins(m1))
 
 mx <- margins(m1, type = "response", variables = "lineage")
 b <- summary(mx)
@@ -823,31 +830,26 @@ fwrite(results, here("results/aneuploidy_results.txt"), sep = "\t", quote = FALS
 
 devtools::session_info()
 
-# ─ Session info ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ─ Session info ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 # setting  value                       
 # version  R version 3.6.1 (2019-07-05)
-# os       macOS Mojave 10.14.6        
+# os       macOS Catalina 10.15.3      
 # system   x86_64, darwin15.6.0        
 # ui       RStudio                     
 # language (EN)                        
 # collate  en_US.UTF-8                 
 # ctype    en_US.UTF-8                 
 # tz       America/New_York            
-# date     2019-12-30                  
+# date     2020-04-22                  
 # 
-# ─ Packages ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ─ Packages ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # package              * version    date       lib source                                     
-# abind                  1.4-5      2016-07-21 [1] CRAN (R 3.6.0)                             
-# acepack                1.4.1      2016-10-29 [1] CRAN (R 3.6.0)                             
 # AnnotationDbi          1.48.0     2019-10-29 [1] Bioconductor                               
 # askpass                1.1        2019-01-13 [1] CRAN (R 3.6.0)                             
 # assertthat             0.2.1      2019-03-21 [1] CRAN (R 3.6.0)                             
 # backports              1.1.5      2019-10-02 [1] CRAN (R 3.6.0)                             
-# base64enc              0.1-3      2015-07-28 [1] CRAN (R 3.6.0)                             
 # batchelor              1.2.2      2019-11-07 [1] Bioconductor                               
 # beeswarm               0.2.3      2016-04-25 [1] CRAN (R 3.6.0)                             
-# BiasedUrn              1.07       2015-12-28 [1] CRAN (R 3.6.0)                             
-# bibtex                 0.4.2      2017-06-30 [1] CRAN (R 3.6.0)                             
 # Biobase              * 2.46.0     2019-10-29 [1] Bioconductor                               
 # BiocFileCache          1.10.2     2019-11-08 [1] Bioconductor                               
 # BiocGenerics         * 0.32.0     2019-10-29 [1] Bioconductor                               
@@ -857,7 +859,6 @@ devtools::session_info()
 # BiocSingular           1.2.0      2019-10-29 [1] Bioconductor                               
 # BiocStyle            * 2.14.0     2019-10-29 [1] Bioconductor                               
 # biomaRt              * 2.42.0     2019-10-29 [1] Bioconductor                               
-# BioNet                 1.46.0     2019-10-29 [1] Bioconductor                               
 # Biostrings             2.54.0     2019-10-29 [1] Bioconductor                               
 # bit                    1.1-14     2018-05-29 [1] CRAN (R 3.6.0)                             
 # bit64                  0.9-7      2017-05-08 [1] CRAN (R 3.6.0)                             
@@ -869,9 +870,9 @@ devtools::session_info()
 # callr                  3.3.2      2019-09-22 [1] CRAN (R 3.6.0)                             
 # caTools                1.17.1.2   2019-03-06 [1] CRAN (R 3.6.0)                             
 # cellranger             1.1.0      2016-07-27 [1] CRAN (R 3.6.0)                             
-# checkmate              1.9.4      2019-07-04 [1] CRAN (R 3.6.0)                             
-# cli                    1.1.0      2019-03-19 [1] CRAN (R 3.6.0)                             
+# cli                    2.0.1      2020-01-08 [1] CRAN (R 3.6.0)                             
 # cluster                2.1.0      2019-06-19 [1] CRAN (R 3.6.1)                             
+# coda                   0.19-3     2019-07-05 [1] CRAN (R 3.6.0)                             
 # codetools              0.2-16     2018-12-24 [1] CRAN (R 3.6.1)                             
 # colorspace             1.4-1      2019-03-18 [1] CRAN (R 3.6.0)                             
 # cowplot              * 1.0.0      2019-07-11 [1] CRAN (R 3.6.0)                             
@@ -889,49 +890,42 @@ devtools::session_info()
 # dqrng                  0.2.1      2019-05-17 [1] CRAN (R 3.6.0)                             
 # edgeR                  3.28.0     2019-10-29 [1] Bioconductor                               
 # ellipsis               0.3.0      2019-09-20 [1] CRAN (R 3.6.0)                             
+# emmeans              * 1.4.5      2020-03-04 [1] CRAN (R 3.6.0)                             
+# estimability           1.3        2018-02-11 [1] CRAN (R 3.6.0)                             
 # evaluate               0.14       2019-05-28 [1] CRAN (R 3.6.0)                             
-# farver                 2.0.1      2019-11-13 [1] CRAN (R 3.6.0)                             
-# foreign                0.8-72     2019-08-02 [1] CRAN (R 3.6.0)                             
-# Formula                1.2-3      2018-05-03 [1] CRAN (R 3.6.0)                             
+# fansi                  0.4.1      2020-01-08 [1] CRAN (R 3.6.0)                             
+# farver                 2.0.3      2020-01-16 [1] CRAN (R 3.6.0)                             
+# fastmatch              1.1-0      2017-01-28 [1] CRAN (R 3.6.0)                             
+# fgsea                * 1.12.0     2019-10-29 [1] Bioconductor                               
 # fs                     1.3.1      2019-05-06 [1] CRAN (R 3.6.0)                             
-# gbRd                   0.4-11     2012-10-01 [1] CRAN (R 3.6.0)                             
 # gdata                  2.18.0     2017-06-06 [1] CRAN (R 3.6.0)                             
-# geneLenDataBase        1.22.0     2019-11-05 [1] Bioconductor                               
 # generics               0.0.2      2018-11-29 [1] CRAN (R 3.6.0)                             
 # GenomeInfoDb         * 1.22.0     2019-10-29 [1] Bioconductor                               
 # GenomeInfoDbData       1.2.2      2019-11-26 [1] Bioconductor                               
 # GenomicAlignments      1.22.1     2019-11-12 [1] Bioconductor                               
-# GenomicFeatures        1.38.0     2019-10-29 [1] Bioconductor                               
 # GenomicRanges        * 1.38.0     2019-10-29 [1] Bioconductor                               
-# ggbeeswarm             0.6.0      2017-08-07 [1] CRAN (R 3.6.0)                             
+# ggbeeswarm           * 0.6.0      2017-08-07 [1] CRAN (R 3.6.0)                             
 # ggdendro             * 0.1-20     2016-04-27 [1] CRAN (R 3.6.0)                             
 # ggplot2              * 3.2.1      2019-08-10 [1] CRAN (R 3.6.0)                             
 # ggrepel              * 0.8.1      2019-05-07 [1] CRAN (R 3.6.0)                             
 # glue                   1.3.1      2019-03-12 [1] CRAN (R 3.6.0)                             
 # gmodels              * 2.18.1     2018-06-25 [1] CRAN (R 3.6.0)                             
-# GO.db                  3.10.0     2019-12-20 [1] Bioconductor                               
-# goseq                  1.38.0     2019-10-29 [1] Bioconductor                               
 # gplots               * 3.0.1.1    2019-01-27 [1] CRAN (R 3.6.0)                             
 # gridExtra            * 2.3        2017-09-09 [1] CRAN (R 3.6.0)                             
 # gtable                 0.3.0      2019-03-25 [1] CRAN (R 3.6.0)                             
 # gtools                 3.8.1      2018-06-26 [1] CRAN (R 3.6.0)                             
 # here                 * 0.1        2017-05-28 [1] CRAN (R 3.6.0)                             
-# Hmisc                  4.3-0      2019-11-07 [1] CRAN (R 3.6.0)                             
 # hms                    0.5.2      2019-10-30 [1] CRAN (R 3.6.0)                             
-# htmlTable              1.13.2     2019-09-22 [1] CRAN (R 3.6.0)                             
 # htmltools              0.4.0      2019-10-04 [1] CRAN (R 3.6.0)                             
-# htmlwidgets            1.5.1      2019-10-08 [1] CRAN (R 3.6.0)                             
 # httr                   1.4.1      2019-08-05 [1] CRAN (R 3.6.0)                             
 # igraph                 1.2.4.1    2019-04-22 [1] CRAN (R 3.6.0)                             
 # IRanges              * 2.20.1     2019-11-20 [1] Bioconductor                               
 # irlba                  2.3.3      2019-02-05 [1] CRAN (R 3.6.0)                             
 # jsonlite               1.6        2018-12-07 [1] CRAN (R 3.6.0)                             
-# KEGG.db                3.2.3      2019-12-20 [1] Bioconductor                               
 # KernSmooth             2.23-16    2019-10-15 [1] CRAN (R 3.6.0)                             
 # knitr                  1.26       2019-11-12 [1] CRAN (R 3.6.0)                             
 # labeling               0.3        2014-08-23 [1] CRAN (R 3.6.0)                             
 # lattice                0.20-38    2018-11-04 [1] CRAN (R 3.6.1)                             
-# latticeExtra           0.6-28     2016-02-09 [1] CRAN (R 3.6.0)                             
 # lava                   1.6.6      2019-08-01 [1] CRAN (R 3.6.0)                             
 # lazyeval               0.2.2      2019-03-15 [1] CRAN (R 3.6.0)                             
 # lifecycle              0.1.0      2019-08-01 [1] CRAN (R 3.6.0)                             
@@ -941,35 +935,37 @@ devtools::session_info()
 # magrittr               1.5        2014-11-22 [1] CRAN (R 3.6.0)                             
 # margins              * 0.3.23     2018-05-22 [1] CRAN (R 3.6.0)                             
 # MASS                   7.3-51.4   2019-03-31 [1] CRAN (R 3.6.1)                             
-# MAST                 * 1.12.0     2019-10-29 [1] Bioconductor                               
 # Matrix               * 1.2-17     2019-03-22 [1] CRAN (R 3.6.1)                             
+# MatrixModels           0.4-1      2015-08-22 [1] CRAN (R 3.6.0)                             
 # matrixStats          * 0.55.0     2019-09-07 [1] CRAN (R 3.6.0)                             
 # memoise                1.1.0      2017-04-21 [1] CRAN (R 3.6.0)                             
-# metap                * 1.1        2019-02-06 [1] CRAN (R 3.6.0)                             
-# mgcv                   1.8-31     2019-11-09 [1] CRAN (R 3.6.0)                             
 # minqa                  1.2.4      2014-10-09 [1] CRAN (R 3.6.0)                             
 # mixtools             * 1.1.0      2017-03-10 [1] CRAN (R 3.6.0)                             
+# moments                0.14       2015-01-05 [1] CRAN (R 3.6.0)                             
 # monocle3             * 0.2.0      2019-11-27 [1] Github (cole-trapnell-lab/monocle3@9becd94)
 # mppa                 * 1.0        2014-08-23 [1] CRAN (R 3.6.0)                             
+# msigdbr              * 7.0.1      2019-09-04 [1] CRAN (R 3.6.0)                             
+# multcomp               1.4-10     2019-03-05 [1] CRAN (R 3.6.0)                             
 # MultiAssayExperiment * 1.12.0     2019-10-29 [1] Bioconductor                               
 # munsell                0.5.0      2018-06-12 [1] CRAN (R 3.6.0)                             
+# mvtnorm                1.0-11     2019-06-19 [1] CRAN (R 3.6.0)                             
 # nlme                   3.1-142    2019-11-07 [1] CRAN (R 3.6.0)                             
 # nloptr                 1.2.1      2018-10-03 [1] CRAN (R 3.6.0)                             
-# nnet                   7.3-12     2016-02-02 [1] CRAN (R 3.6.1)                             
 # openssl                1.4.1      2019-07-18 [1] CRAN (R 3.6.0)                             
-# org.Hs.eg.db           3.10.0     2019-12-20 [1] Bioconductor                               
-# pillar                 1.4.2      2019-06-29 [1] CRAN (R 3.6.0)                             
+# pbmcapply            * 1.5.0      2019-07-10 [1] CRAN (R 3.6.0)                             
+# pillar                 1.4.3      2019-12-20 [1] CRAN (R 3.6.0)                             
 # pkgbuild               1.0.6      2019-10-09 [1] CRAN (R 3.6.0)                             
 # pkgconfig              2.0.3      2019-09-22 [1] CRAN (R 3.6.0)                             
 # pkgload                1.0.2      2018-10-29 [1] CRAN (R 3.6.0)                             
-# plyr                 * 1.8.4      2016-06-08 [1] CRAN (R 3.6.0)                             
+# plyr                 * 1.8.5      2019-12-10 [1] CRAN (R 3.6.0)                             
 # prediction             0.3.14     2019-06-17 [1] CRAN (R 3.6.0)                             
 # prettyunits            1.0.2      2015-07-13 [1] CRAN (R 3.6.0)                             
 # processx               3.4.1      2019-07-18 [1] CRAN (R 3.6.0)                             
 # prodlim              * 2019.11.13 2019-11-17 [1] CRAN (R 3.6.0)                             
 # progress               1.2.2      2019-05-16 [1] CRAN (R 3.6.0)                             
 # ps                     1.3.0      2018-12-21 [1] CRAN (R 3.6.0)                             
-# purrr                  0.3.3      2019-10-18 [1] CRAN (R 3.6.0)                             
+# purrr                * 0.3.3      2019-10-18 [1] CRAN (R 3.6.0)                             
+# quantreg               5.52       2019-11-09 [1] CRAN (R 3.6.0)                             
 # qvalue               * 2.18.0     2019-10-29 [1] Bioconductor                               
 # R.methodsS3            1.7.1      2016-02-16 [1] CRAN (R 3.6.0)                             
 # R.oo                   1.23.0     2019-11-03 [1] CRAN (R 3.6.0)                             
@@ -977,39 +973,38 @@ devtools::session_info()
 # R6                     2.4.1      2019-11-12 [1] CRAN (R 3.6.0)                             
 # rappdirs               0.3.1      2016-03-28 [1] CRAN (R 3.6.0)                             
 # RColorBrewer           1.1-2      2014-12-07 [1] CRAN (R 3.6.0)                             
-# Rcpp                   1.0.3      2019-11-08 [1] CRAN (R 3.6.0)                             
+# Rcpp                 * 1.0.3      2019-11-08 [1] CRAN (R 3.6.0)                             
 # RcppAnnoy              0.0.14     2019-11-12 [1] CRAN (R 3.6.0)                             
 # RcppParallel           4.4.4      2019-09-27 [1] CRAN (R 3.6.0)                             
 # RCurl                  1.95-4.12  2019-03-04 [1] CRAN (R 3.6.0)                             
-# Rdpack                 0.11-0     2019-04-14 [1] CRAN (R 3.6.0)                             
-# reactome.db            1.70.0     2019-12-20 [1] Bioconductor                               
 # readxl               * 1.3.1      2019-03-13 [1] CRAN (R 3.6.0)                             
 # remotes                2.1.0      2019-06-24 [1] CRAN (R 3.6.0)                             
 # reshape2               1.4.3      2017-12-11 [1] CRAN (R 3.6.0)                             
 # reticulate             1.13       2019-07-24 [1] CRAN (R 3.6.0)                             
-# rlang                  0.4.2      2019-11-23 [1] CRAN (R 3.6.0)                             
+# rlang                  0.4.4      2020-01-28 [1] CRAN (R 3.6.0)                             
 # rmarkdown              1.17       2019-11-13 [1] CRAN (R 3.6.0)                             
 # rmeta                  3.0        2018-03-20 [1] CRAN (R 3.6.0)                             
-# rpart                  4.1-15     2019-04-12 [1] CRAN (R 3.6.1)                             
 # rprojroot              1.3-2      2018-01-03 [1] CRAN (R 3.6.0)                             
 # Rsamtools              2.2.1      2019-11-06 [1] Bioconductor                               
 # RSpectra               0.15-0     2019-06-11 [1] CRAN (R 3.6.0)                             
 # RSQLite                2.1.2      2019-07-24 [1] CRAN (R 3.6.0)                             
 # rstudioapi             0.10       2019-03-19 [1] CRAN (R 3.6.0)                             
 # rsvd                   1.0.2      2019-07-29 [1] CRAN (R 3.6.0)                             
-# rtracklayer            1.46.0     2019-10-29 [1] Bioconductor                               
+# rtracklayer          * 1.46.0     2019-10-29 [1] Bioconductor                               
 # Rtsne                * 0.15       2018-11-10 [1] CRAN (R 3.6.0)                             
 # S4Vectors            * 0.24.0     2019-10-29 [1] Bioconductor                               
+# sandwich               2.5-1      2019-04-06 [1] CRAN (R 3.6.0)                             
 # scales               * 1.1.0      2019-11-18 [1] CRAN (R 3.6.0)                             
 # scater               * 1.14.4     2019-11-18 [1] Bioconductor                               
+# SCnorm               * 1.8.2      2019-11-22 [1] Bioconductor                               
 # scploid              * 0.9        2019-11-26 [1] Github (MarioniLab/Aneuploidy2017@286c064) 
 # scran                * 1.14.5     2019-11-19 [1] Bioconductor                               
 # segmented              1.1-0      2019-12-10 [1] CRAN (R 3.6.0)                             
 # sessioninfo            1.1.1      2018-11-05 [1] CRAN (R 3.6.0)                             
 # SingleCellExperiment * 1.8.0      2019-10-29 [1] Bioconductor                               
-# SMITE                * 1.14.0     2019-10-29 [1] Bioconductor                               
+# SparseM                1.77       2017-04-23 [1] CRAN (R 3.6.0)                             
 # statmod                1.4.32     2019-05-29 [1] CRAN (R 3.6.0)                             
-# stringi                1.4.3      2019-03-12 [1] CRAN (R 3.6.0)                             
+# stringi                1.4.5      2020-01-11 [1] CRAN (R 3.6.0)                             
 # stringr              * 1.4.0      2019-02-10 [1] CRAN (R 3.6.0)                             
 # SummarizedExperiment * 1.16.0     2019-10-29 [1] Bioconductor                               
 # SuppDists              1.1-9.4    2016-09-23 [1] CRAN (R 3.6.0)                             
@@ -1017,26 +1012,25 @@ devtools::session_info()
 # survival             * 3.1-7      2019-11-09 [1] CRAN (R 3.6.0)                             
 # survivalROC            1.0.3      2013-01-13 [1] CRAN (R 3.6.0)                             
 # testthat               2.3.0      2019-11-05 [1] CRAN (R 3.6.0)                             
+# TH.data                1.0-10     2019-01-21 [1] CRAN (R 3.6.0)                             
 # tibble                 2.1.3      2019-06-06 [1] CRAN (R 3.6.0)                             
 # tidyr                * 1.0.0      2019-09-11 [1] CRAN (R 3.6.0)                             
 # tidyselect             0.2.5      2018-10-11 [1] CRAN (R 3.6.0)                             
-# TreeBH               * 1.0        2019-11-26 [1] local                                      
+# TreeBH               * 1.0        2019-12-31 [1] local                                      
 # umap                 * 0.2.3.1    2019-08-21 [1] CRAN (R 3.6.0)                             
 # usethis              * 1.5.1      2019-07-04 [1] CRAN (R 3.6.0)                             
 # uwot                   0.1.4      2019-09-23 [1] CRAN (R 3.6.0)                             
-# vctrs                  0.2.0      2019-07-05 [1] CRAN (R 3.6.0)                             
+# vctrs                  0.2.2      2020-01-24 [1] CRAN (R 3.6.0)                             
 # vipor                  0.4.5      2017-03-22 [1] CRAN (R 3.6.0)                             
-# viridis                0.5.1      2018-03-29 [1] CRAN (R 3.6.0)                             
-# viridisLite            0.3.0      2018-02-01 [1] CRAN (R 3.6.0)                             
+# viridis              * 0.5.1      2018-03-29 [1] CRAN (R 3.6.0)                             
+# viridisLite          * 0.3.0      2018-02-01 [1] CRAN (R 3.6.0)                             
 # withr                  2.1.2      2018-03-15 [1] CRAN (R 3.6.0)                             
 # xfun                   0.11       2019-11-12 [1] CRAN (R 3.6.0)                             
 # XML                    3.98-1.20  2019-06-06 [1] CRAN (R 3.6.0)                             
+# xtable                 1.8-4      2019-04-21 [1] CRAN (R 3.6.0)                             
 # XVector                0.26.0     2019-10-29 [1] Bioconductor                               
 # yaml                   2.2.0      2018-07-25 [1] CRAN (R 3.6.0)                             
-# zeallot                0.1.0      2018-01-28 [1] CRAN (R 3.6.0)                             
 # zlibbioc               1.32.0     2019-10-29 [1] Bioconductor                               
 # zoo                  * 1.8-6      2019-05-28 [1] CRAN (R 3.6.0)                             
 # 
 # [1] /Library/Frameworks/R.framework/Versions/3.6/Resources/library
-
-
