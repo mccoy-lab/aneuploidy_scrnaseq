@@ -194,11 +194,14 @@ dt_zhou[, num_estage := as.numeric(gsub("D", "", day))]
 dt_zhou[, is_aneuploid := (ploidy == "aneuploid")]
 dt_zhou[, is_trophectoderm :=  (lineage == "te")]
 
-m2 <- glmer(data = dt_zhou, formula = is_aneuploid ~ (1 | embryo) + num_estage + is_trophectoderm, family = "binomial")
+m2 <- glmer(data = dt_zhou, formula = is_aneuploid ~ (1 | embryo) + num_estage, family = "binomial")
 summary(margins(m2))
 
-m3 <- glmer(data = dt_zhou, formula = is_aneuploid ~ (1 | embryo) + num_estage * is_trophectoderm, family = "binomial")
-summary(m3)
+m3 <- glmer(data = dt_zhou, formula = is_aneuploid ~ (1 | embryo) + num_estage + is_trophectoderm, family = "binomial")
+summary(margins(m3))
+
+m4 <- glmer(data = dt_zhou, formula = is_aneuploid ~ (1 | embryo) + num_estage * is_trophectoderm, family = "binomial")
+summary(m4)
 
 # zhou et al. 2019; scRNA-seq
 
@@ -221,11 +224,17 @@ dt_zhou_rna[, is_aneuploid_numeric := as.numeric(NA)]
 dt_zhou_rna[is_aneuploid == TRUE, is_aneuploid_numeric := 1]
 dt_zhou_rna[is_aneuploid == FALSE, is_aneuploid_numeric := 0]
 
-m4 <- glmer(data = dt_zhou_rna, formula = is_aneuploid ~ (1 | Ori_Day_Emb) + num_estage + is_trophectoderm, family = "binomial")
-summary(margins(m4))
+# ignoring cell type, test for change in aneuploidy rate across days of development 
+m5 <- glmer(data = dt_zhou_rna, formula = is_aneuploid ~ (1 | Ori_Day_Emb) + num_estage, family = "binomial")
+summary(margins(m5))
 
-m5 <- glmer(data = dt_zhou_rna, formula = is_aneuploid ~ (1 | Ori_Day_Emb) + num_estage * is_trophectoderm, family = "binomial")
-summary(m5)
+# test for enrichment of aneuploidy in the TE
+m6 <- glmer(data = dt_zhou_rna, formula = is_aneuploid ~ (1 | Ori_Day_Emb) + num_estage + is_trophectoderm, family = "binomial")
+summary(margins(m6))
+
+# test whether TE-specific enrichment changes over time
+m7 <- glmer(data = dt_zhou_rna, formula = is_aneuploid ~ (1 | Ori_Day_Emb) + num_estage * is_trophectoderm, family = "binomial")
+summary(m7)
 
 ###
 
