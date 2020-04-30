@@ -1,7 +1,7 @@
-list_of_packages <- c("broom", "cowplot", "data.table", "dplyr", "fgsea", "GenomicRanges", 
-                      "ggbeeswarm", "ggplot2", "ggrepel", "here", "lme4", "margins", 
-                      "msigdbr", "MultiAssayExperiment", "pbmcapply", "qvalue", "rtracklayer", 
-                      "SCnorm", "SingleCellExperiment", "viridis")
+list_of_packages <- c("broom", "cowplot", "data.table", "dplyr", "emmeans", "fgsea",
+                      "GenomicRanges", "ggbeeswarm", "ggplot2", "ggrepel", "here", "lme4", 
+                      "margins", "msigdbr", "MultiAssayExperiment", "pbmcapply", "purrr",
+                      "qvalue", "rtracklayer", "SCnorm", "SingleCellExperiment", "viridis")
 
 # install and load packages
 # https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
@@ -71,7 +71,7 @@ conquer_ref <- readRDS(here("external_metadata/Homo_sapiens.GRCh38.84.cdna.ncrna
   as.data.table()
 rowData(emtab_sce)$seqnames <- conquer_ref$seqnames
 
-nb_dge <- function(sce_object, results_data, gene_index, slope = "fixed") {
+nb_dge <- function(sce_object, results_data, gene_index, interaction = FALSE) {
   
   cds_gene <- data.table(cell = names(assays(sce_object)$normcounts[gene_index,]), 
                          counts = assays(sce_object)$normcounts[gene_index,])
@@ -93,20 +93,7 @@ nb_dge <- function(sce_object, results_data, gene_index, slope = "fixed") {
   aneuploid_cells <- unique(results_data[sig_chrom == 1 & chr == gene_chr]$cell)
   cds_gene <- cds_gene[!(cell %in% aneuploid_cells)]
   
-  if (slope == "fixed") {  
-    
-    m1 <- glmer.nb(data = cds_gene, 
-                   formula = round(counts + 1) ~ (1 | embryo) + (1 | lineage) + num_estage + is_aneuploid, 
-                   nAGQ = 0) 
-    
-    m1 <- suppressWarnings(tidy(m1)) %>%
-      mutate(gene_id = gene_id) %>%
-      filter(group == "fixed") %>%
-      as.data.table()
-    
-    return(m1)
-    
-  } else if (slope == "random") {
+  if (interaction == FALSE) {
     
     m1 <- glmer.nb(data = cds_gene, 
                    formula = round(counts + 1) ~ (1 | embryo) + (1 | lineage) + num_estage + is_aneuploid, 
@@ -165,9 +152,35 @@ nb_dge <- function(sce_object, results_data, gene_index, slope = "fixed") {
       results_summary[term == "is_aneuploidTRUE", AME_SE := results_margins[factor == "is_aneuploid"]$SE]
       results_summary[term == "is_aneuploidTRUE", AME_P := results_margins[factor == "is_aneuploid"]$p]
       
+      return(results_summary)
     }
+  } else if (interaction == TRUE) {
     
-    return(results_summary)
+    m1 <- glmer.nb(data = cds_gene, 
+                   formula = round(counts + 1) ~ (1 | embryo) + num_estage + is_aneuploid + lineage, 
+                   nAGQ = 0)
+    
+    m2 <- glmer.nb(data = cds_gene, 
+                   formula = round(counts + 1) ~ (1 | embryo) + num_estage + is_aneuploid * lineage, 
+                   nAGQ = 0)
+    
+    m2_m1_anova <- anova(m2, m1, test = "Chisq")
+    m2_m1_anova <- suppressWarnings(tidy(m2_m1_anova))
+    
+    ame_main <- emmeans(m2, revpairwise ~ is_aneuploid | lineage, data = cds_gene)$contrasts %>%
+      as.data.table() %>%
+      .[, gene_id := gene_id] %>%
+      .[, gene_symbol := gene_symbol] %>%
+      .[, anova_pval := m2_m1_anova[2,]$p.value]
+    
+    ame_interaction <- contrast(emmeans(m2, pairwise ~ is_aneuploid * lineage, data = cds_gene)[[1]], 
+                                interaction = c("revpairwise")) %>%
+      as.data.table() %>%
+      .[, gene_id := gene_id] %>%
+      .[, gene_symbol := gene_symbol] %>%
+      .[, anova_pval := m2_m1_anova[2,]$p.value]
+    
+    return(list(ame_main, ame_interaction))
   }
 }
 
@@ -218,6 +231,103 @@ dge_aneuploidy <- dge_dt[term == "is_aneuploidTRUE"] %>%
   as.data.table()
 
 dge_aneuploidy[, q.value := qvalue(dge_aneuploidy$p.value)$qvalues]
+dge_aneuploidy[, AME_Q := qvalue(dge_aneuploidy$AME_P)$qvalues]
+
+sig_gene_ids <- dge_aneuploidy[AME_Q < 0.05]$gene_id
+sig_gene_idx <- which(rowData(emtab_sce)$gene %in% sig_gene_ids)
+
+# interaction model
+dge_results_interaction <- do.call(list, pbmclapply(sig_gene_idx, 
+                                                    function(x) {
+                                                      r <- tryCatch(
+                                                        withCallingHandlers(
+                                                          {
+                                                            error_text <- "No error."
+                                                            list(value = nb_dge(emtab_sce, results, x, interaction = TRUE), error_text = error_text)
+                                                          }, 
+                                                          warning = function(e) {
+                                                            error_text <<- trimws(paste0("WARNING: ", e))
+                                                            invokeRestart("muffleWarning")
+                                                          }), 
+                                                        error = function(e) {
+                                                          return(list(value = NA, error_text = trimws(paste0("ERROR: ", e))))
+                                                        }, 
+                                                        finally = {
+                                                        }
+                                                      )
+                                                      return(r)
+                                                    }, mc.cores = 6, ignore.interactive = getOption("ignore.interactive", T)))
+
+no_warning_models <- which(grepl("eta", map(dge_results_interaction, 2)))
+
+cell_type_specific_main <- sapply(map(dge_results_interaction, 1), function(x) x[1])[no_warning_models] %>% 
+  rbindlist()
+
+cell_type_specific_interaction <- sapply(map(dge_results_interaction, 1), function(x) x[2])[no_warning_models] %>% 
+  rbindlist()
+
+cell_type_specific_main[!duplicated(gene_id)] %>%
+  mutate(q = qvalue(.$anova_pval)$qvalues) %>%
+  filter(q < 0.05) %>%
+  nrow()
+
+# plot interaction
+
+plot_interaction <- function(sce_object, results_data, gene_id) {
+  
+  gene_index <- which(rowData(sce_object)$gene == gene_id)
+  
+  cds_gene <- data.table(cell = names(assays(sce_object)$normcounts[gene_index,]), 
+                         counts = assays(sce_object)$normcounts[gene_index,])
+  
+  if (nrow(cds_gene[counts >= 1]) < (nrow(cds_gene) / 2)) {
+    stop("Too few cells with count >= 1.")
+  }
+  
+  gene_id <- as.character(rowData(sce_object)$gene[gene_index])
+  gene_symbol <- as.character(rowData(sce_object)$symbol[gene_index])
+  gene_chr <- paste0("chr", as.character(rowData(sce_object)$seqnames[gene_index]))
+  
+  cds_gene <- suppressWarnings(merge(cds_gene, 
+                                     colData(sce_object) %>% as.data.table(., keep.rownames = "cell"),
+                                     "cell"))
+  
+  # drop cells with aneuploidies affecting the same chromosome as the location of the gene
+  # being tested for differential expression
+  aneuploid_cells <- unique(results_data[sig_chrom == 1 & chr == gene_chr]$cell)
+  cds_gene <- cds_gene[!(cell %in% aneuploid_cells)]
+  
+  m1 <- glmer.nb(data = cds_gene, 
+                 formula = round(counts + 1) ~ (1 | embryo) + num_estage + is_aneuploid + lineage, 
+                 nAGQ = 0)
+  
+  m2 <- glmer.nb(data = cds_gene, 
+                 formula = round(counts + 1) ~ (1 | embryo) + num_estage + is_aneuploid * lineage, 
+                 nAGQ = 0)
+  
+  emmip_plot <- emmip(m2, lineage ~ is_aneuploid, CIs = TRUE, type = "response") +
+    theme_classic() +
+    scale_x_discrete(labels = c('Euploid','Aneuploid')) +
+    scale_color_manual(values = c('#66a61e', '#d95f02','#e7298a','#e6ab02', '#7570b3', '#1b9e77'), name = "Cell type") +
+    xlab("") +
+    ylab("Predicted expression (normalized counts)") +
+    ggtitle(gene_symbol) +
+    theme(plot.title = element_text(face = "italic"))
+  
+  print(emmip_plot)
+  
+  ame_main <- emmeans(m2, revpairwise ~ is_aneuploid | lineage, data = cds_gene)$contrasts %>%
+    as.data.table()
+  
+  ame_interaction <- contrast(emmeans(m2, pairwise ~ is_aneuploid * lineage, data = cds_gene)[[1]], 
+                                  interaction = c("revpairwise")) %>%
+    as.data.table()
+  
+  return(list(ame_main, ame_interaction))
+}
+
+plot_interaction(emtab_sce, results, "ENSG00000128989.10")
+plot_interaction(emtab_sce, results, "ENSG00000185728.16")
 
 ## enrichment analysis
 
@@ -353,7 +463,7 @@ plot_dge <- function(sce_object, results_data, gene_symbol) {
     ylab("Normalized counts (zeros excluded)") +
     xlab("Embryonic stage") +
     theme(plot.title = element_text(face = "italic")) +
-    ggtitle(gene_symbol)
+    ggtitle(gene_symbol) 
   
   return(p1)
 }
@@ -366,6 +476,20 @@ dge_aneuploidy_to_supplement <- setorder(dge_aneuploidy, p.value) %>%
   setnames(c("ensembl_id", "symbol", "beta", "beta_se", "beta_p", "beta_q", "ame", "ame_se", "ame_p"))
 
 fwrite(dge_aneuploidy_to_supplement, file = here("results/dge_results.txt"), 
+       quote = FALSE, row.names = FALSE, col.names = TRUE, sep = "\t")
+
+cell_type_specific_main_to_supplement <- setorder(cell_type_specific_main, anova_pval, gene_symbol) %>%
+  select(c("gene_id", "gene_symbol", "anova_pval", "lineage", "estimate", "SE", "p.value")) %>%
+  setnames(c("ensembl_id", "symbol", "anova_p", "cell_type", "contrast_ame", "contrast_ame_se", "contrast_ame_p"))
+
+fwrite(cell_type_specific_main_to_supplement, file = here("results/cell_type_specific_main_results.txt"), 
+       quote = FALSE, row.names = FALSE, col.names = TRUE, sep = "\t")
+
+cell_type_specific_interaction_to_supplement <- setorder(cell_type_specific_interaction, anova_pval, gene_symbol) %>%
+  select(c("gene_id", "gene_symbol", "anova_pval", "lineage_revpairwise", "estimate", "SE", "p.value")) %>%
+  setnames(c("ensembl_id", "symbol", "anova_p", "cell_type_interaction", "contrast_ame", "contrast_ame_se", "contrast_ame_p"))
+
+fwrite(cell_type_specific_interaction_to_supplement, file = here("results/cell_type_specific_interaction_results.txt"), 
        quote = FALSE, row.names = FALSE, col.names = TRUE, sep = "\t")
 
 ###
