@@ -70,30 +70,34 @@ results <- fread(here("results/aneuploidy_results.txt")) # load results data
 
 # examine allic ratios in real data
 ggplot(data = results, aes(x = allelic_ratio, fill = factor(ploidy))) +
-  geom_histogram(bins = 100) +
-  facet_grid(factor(ploidy) ~ ., scales = "free_y")
+  geom_histogram(bins = 100, alpha = .8) +
+  facet_grid(factor(ploidy) ~ ., scales = "free_y") +
+  theme_bw()
 
 # function to get parameters of a beta distribution given
 # mean and variance
-get_alpha_beta <- function(mu, var){
+get_alpha_beta <- function(mu, var) {
+  if (var >= mu * (1 - mu)) {
+    stop("Variance too large")
+  }
   b <- (mu * (1 - mu) * (1 - mu) / var ) - (1 - mu)
   a <- b * mu / (1 - mu)
   c(a, b)
 }
 
 # function to simulate new allelic ratios of given ploidy
-simulate_allelic_ratio <- function(results_dt, ploidy_sim = 2, n_sim = 1000, cv = NA) {
+simulate_allelic_ratio <- function(results_dt, ploidy_sim = 2, n_sim = 1000, OD = NA) {
   
   mu_input <- mean(results_dt[ploidy == ploidy_sim]$allelic_ratio)
   
-  if (is.na(cv)) {
+  if (is.na(OD)) {
     var_input <- var(results_dt[ploidy == ploidy_sim]$allelic_ratio)
     beta_params <- get_alpha_beta(mu_input, var_input)
   } else {
-    new_var <- (cv * mu_input) ^ 2
+    new_var <- OD * var(results_dt[ploidy == ploidy_sim]$allelic_ratio)
     beta_params <- get_alpha_beta(mu_input, new_var)
   }
-
+  
   sim_results <- data.table(ploidy = ploidy_sim,
                             sim_allelic_ratio = rbeta(n = n_sim, beta_params[1], beta_params[2]))
   return(sim_results)
@@ -269,8 +273,8 @@ results[, cell_group := paste(EStage, lineage, sep = "_")]
 
 # main function to simulate and evaluate performance
 # od_input specifies gene expression overdispersion
-# cv_input specifies allelic imbalance coefficient of variation
-simulate_main <- function(sim_i, results_input, ploidytest_input, od_input, cv_input) {
+# od_input_aim specifies allelic imbalance coefficient scaling factor
+simulate_main <- function(sim_i, results_input, ploidytest_input, od_input, od_input_aim) {
   # run gene expression simulation
   sim_counts_stratified <- lapply(unique(results_input$cell_group), 
                                   function(x) sim_by_celltype(results, ploidytest_input, x, od = od_input))
@@ -323,9 +327,9 @@ simulate_main <- function(sim_i, results_input, ploidytest_input, od_input, cv_i
                                allow.cartesian = TRUE)
   
   # simulate allelic imbalance
-  monosomy_ar <- simulate_allelic_ratio(results_input, 1, n = nrow(scploid_sim_results[monosomy == TRUE]), cv_input)
-  disomy_ar <- simulate_allelic_ratio(results_input, 2, n = nrow(scploid_sim_results[is.na(monosomy)]), cv_input)
-  trisomy_ar <- simulate_allelic_ratio(results_input, 3, n = nrow(scploid_sim_results[monosomy == FALSE]), cv_input)
+  monosomy_ar <- simulate_allelic_ratio(results_input, 1, n = nrow(scploid_sim_results[monosomy == TRUE]), od_input_aim)
+  disomy_ar <- simulate_allelic_ratio(results_input, 2, n = nrow(scploid_sim_results[is.na(monosomy)]), od_input_aim)
+  trisomy_ar <- simulate_allelic_ratio(results_input, 3, n = nrow(scploid_sim_results[monosomy == FALSE]), od_input_aim)
   
   scploid_sim_results[, allelic_ratio := as.numeric(NA)]
   scploid_sim_results[monosomy == TRUE, allelic_ratio := monosomy_ar$sim_allelic_ratio]
@@ -379,7 +383,7 @@ simulate_main <- function(sim_i, results_input, ploidytest_input, od_input, cv_i
   performance_results <- rbind(fdr_0.001, fdr_0.005, fdr_0.01, fdr_0.05) %>%
     .[, sim_index := sim_i] %>%
     .[, overdispersion := od_input] %>%
-    .[, ase_cv := cv_input]
+    .[, ase_od := od_input_aim]
   
   return(performance_results)
 }
@@ -389,10 +393,10 @@ set.seed(12983)
 
 sim_list <- list()
 for (i in c(0.3, 1, 5)){
-  for (j in c(.1, NA, 0.6)) {
+  for (j in c(0.3, 1, 5)) {
     tmp_sim <- do.call(rbind, pbmclapply(1:100, 
                                          function(x) simulate_main(x, results, ploidytest_dt, 
-                                                                   od_input = i, cv_input = j),
+                                                                   od_input = i, od_input_aim = j),
                                          mc.cores = getOption("mc.cores", 48L),
                                          mc.set.seed = TRUE))
     element_name <- paste("overdispersion = ", i, "; cv = ", j)
@@ -401,29 +405,34 @@ for (i in c(0.3, 1, 5)){
 }
 sim <- rbindlist(sim_list)
 
-sim_summary <- group_by(sim, signature, nom_fdr, overdispersion, ase_cv) %>%
-  summarize_all(list(mean)) %>%
+sim_summary <- group_by(sim, signature, nom_fdr, overdispersion, ase_od) %>%
   select(-sim_index) %>%
-  arrange(nom_fdr, overdispersion, ase_cv, signature) %>%
-  as.data.table()
+  summarize_all(list(mean)) %>%
+  arrange(nom_fdr, overdispersion, ase_od, signature) %>%
+  as.data.table() %>%
+  setnames(., "overdispersion", "OD_DOS") %>%
+  setnames(., "ase_od", "OD_AI")
 
 fwrite(sim_summary, file = here("results/performance_sim.txt"), sep = "\t", quote = FALSE, col.names = TRUE, row.names = FALSE)
 
-ggplot(data = sim, aes(x = factor(nom_fdr), y = sensitivity, color = factor(signature))) +
-    geom_point() +
-    facet_wrap(paste("CV =", ase_cv) ~ paste("OD =", overdispersion))
-
-ggplot(data = sim, aes(x = factor(nom_fdr), y = specificity, color = factor(signature))) +
+ggplot(data = sim_summary, aes(x = factor(nom_fdr), y = sensitivity, color = factor(signature))) +
+  theme_bw() +
   geom_point() +
-  facet_wrap(paste("CV =", ase_cv) ~ paste("OD =", overdispersion))
+  ylim(0, 1) +
+  facet_wrap(OD_AI ~ OD_DOS,
+             labeller = label_both) +
+  xlab("Nominal FDR") +
+  ylab("Sensitivity") +
+  scale_color_brewer(name = "", palette = "Dark2")
 
-ggplot(data = sim, aes(x = factor(nom_fdr), y = precision, color = factor(signature))) +
+ggplot(data = sim_summary, aes(x = factor(nom_fdr), y = specificity, color = factor(signature))) +
+  theme_bw() +
   geom_point() +
-  facet_wrap(paste("CV =", ase_cv) ~ paste("OD =", overdispersion))
-
-ggplot(data = sim_summary, aes(x = factor(nom_fdr), y = f1, color = factor(signature))) +
-  geom_point() +
-  facet_wrap(paste("CV =", ase_cv) ~ paste("OD =", overdispersion))
+  facet_wrap(OD_AI ~ OD_DOS,
+             labeller = label_both) +
+  xlab("Nominal FDR") +
+  ylab("Specificity") +
+  scale_color_brewer(name = "", palette = "Dark2")
 
 
 ###
